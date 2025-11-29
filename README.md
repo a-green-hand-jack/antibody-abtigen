@@ -143,6 +143,9 @@ antibody-abtigen --limit 10
 # Dry-run mode (analysis only, no structure downloads)
 antibody-abtigen --limit 50 --dry-run
 
+# Filter to retain only antibody–antigen contacts (after build)
+antibody-abtigen filter-interactions --input ./output --output ./output_filtered
+
 # Custom thresholds
 antibody-abtigen --resolution 3.0 --identity 60 --limit 100
 

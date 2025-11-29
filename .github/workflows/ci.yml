@@ -76,6 +76,20 @@ jobs:
         uv run python run.py --limit 5 --no-pymol
       timeout-minutes: 10
 
+    - name: Run interaction filter
+      run: |
+        uv run antibody-abtigen filter-interactions --input ./output --output ./output_filtered --distance-threshold 5.0 --min-contacts 1
+
+    - name: Check filter summary
+      run: |
+        if [ -f "output_filtered/filter_summary.csv" ]; then
+          echo "Filter summary generated:"
+          head -n 5 output_filtered/filter_summary.csv
+        else
+          echo "Error: filter_summary.csv not found"
+          exit 1
+        fi
+
     - name: Check results
       run: |
         echo "=== Dataset Summary ==="

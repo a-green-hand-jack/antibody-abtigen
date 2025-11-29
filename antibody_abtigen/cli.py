@@ -7,6 +7,7 @@ import sys
 import click
 
 from .pipeline import CrossSpeciesDatasetPipeline
+from .filtering import filter_dataset
 
 
 @click.group()
@@ -229,6 +230,82 @@ def to_yaml_command(input_dir: str, output: str, no_bonds: bool):
     except Exception as e:
         click.echo(f"\nError: {e}", err=True)
         raise
+
+
+@cli.command('filter-interactions')
+@click.option(
+    '--input', '-i', 'input_dir',
+    required=True,
+    help='Input directory containing DP_* folders (from build step)',
+    type=click.Path(exists=True)
+)
+@click.option(
+    '--output', '-o',
+    required=True,
+    help='Output directory for filtered DP_* folders and summary CSV',
+    type=click.Path()
+)
+@click.option(
+    '--distance-threshold',
+    default=5.0,
+    show_default=True,
+    type=float,
+    help='Maximum atom-atom distance (Å) to count as a contact'
+)
+@click.option(
+    '--min-contacts',
+    default=10,
+    show_default=True,
+    type=int,
+    help='Minimum contact pairs required to keep a data point'
+)
+@click.option(
+    '--dry-run',
+    is_flag=True,
+    default=False,
+    help='Do not copy data; only produce summary'
+)
+def filter_interactions_command(
+    input_dir: str,
+    output: str,
+    distance_threshold: float,
+    min_contacts: int,
+    dry_run: bool,
+):
+    """
+    Filter DP_* folders to keep only antibody-antigen pairs with contacts.
+
+    Uses atom-atom distance to confirm interaction and writes filter_summary.csv.
+    """
+    if os.path.abspath(input_dir) == os.path.abspath(output) and not dry_run:
+        click.echo("Error: output directory must differ from input (or use --dry-run).", err=True)
+        raise click.Abort()
+
+    click.echo("=" * 60)
+    click.echo("Antibody-Antigen Interaction Filter")
+    click.echo("=" * 60)
+    click.echo(f"Input: {input_dir}")
+    click.echo(f"Output: {output}")
+    click.echo(f"Distance threshold: {distance_threshold} Å")
+    click.echo(f"Min contacts: {min_contacts}")
+    click.echo(f"Dry run: {dry_run}")
+    click.echo()
+
+    results = filter_dataset(
+        input_dir=input_dir,
+        output_dir=output,
+        distance_threshold=distance_threshold,
+        min_contacts=min_contacts,
+        dry_run=dry_run,
+    )
+
+    kept = sum(1 for r in results if r.passed)
+    total = len(results)
+    click.echo(f"Checked {total} data points; kept {kept}.")
+    summary_path = os.path.join(output, "filter_summary.csv")
+    if dry_run:
+        click.echo("Dry run complete (no data copied).")
+    click.echo(f"Summary: {summary_path}")
 
 
 # Main entry point - use cli group
