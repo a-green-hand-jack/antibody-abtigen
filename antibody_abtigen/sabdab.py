@@ -155,6 +155,140 @@ def get_unique_complexes(df: pd.DataFrame) -> pd.DataFrame:
     return unique
 
 
+def save_filtered_summary(df: pd.DataFrame, output_path: str) -> str:
+    """
+    Save filtered SAbDab summary to CSV.
+
+    Args:
+        df: Filtered DataFrame
+        output_path: Path to save the filtered CSV
+
+    Returns:
+        Path to the saved file
+    """
+    df.to_csv(output_path, index=False)
+    print(f"Saved filtered summary to {output_path}")
+    return output_path
+
+
+def find_mouse_antigen_in_sabdab(
+    df: pd.DataFrame,
+    antigen_name: str,
+    human_uniprot_id: Optional[str] = None,
+    resolution_threshold: float = 2.5
+) -> Optional[dict]:
+    """
+    Search for mouse antigen structures in SAbDab data.
+
+    This function prioritizes experimental structures from SAbDab
+    over predicted structures from AlphaFold/RCSB.
+
+    Args:
+        df: Full SAbDab DataFrame (including all species)
+        antigen_name: Human antigen name to search for
+        human_uniprot_id: Optional UniProt ID to help match orthologs
+        resolution_threshold: Maximum resolution in Angstroms
+
+    Returns:
+        Best matching mouse structure info or None
+    """
+    if df is None or df.empty:
+        return None
+
+    # Normalize antigen name for matching
+    antigen_name_lower = antigen_name.lower().strip()
+
+    # Filter for mouse antigens
+    mouse_mask = df['antigen_species'].str.contains('mus musculus|mouse', case=False, na=False)
+    mouse_entries = df[mouse_mask].copy()
+
+    if mouse_entries.empty:
+        return None
+
+    # Filter for protein antigens
+    protein_mask = mouse_entries['antigen_type'].str.contains('protein', case=False, na=False)
+    mouse_entries = mouse_entries[protein_mask]
+
+    if mouse_entries.empty:
+        return None
+
+    # Try to match by antigen name (case-insensitive)
+    if 'antigen_name' in mouse_entries.columns:
+        # Exact match first
+        name_mask = mouse_entries['antigen_name'].str.lower().str.strip() == antigen_name_lower
+        matched = mouse_entries[name_mask]
+
+        # If no exact match, try partial match
+        if matched.empty:
+            name_mask = mouse_entries['antigen_name'].str.lower().str.contains(
+                antigen_name_lower, na=False
+            )
+            matched = mouse_entries[name_mask]
+
+        if not matched.empty:
+            mouse_entries = matched
+
+    # Filter by resolution
+    if 'resolution' in mouse_entries.columns:
+        mouse_entries['resolution_num'] = pd.to_numeric(mouse_entries['resolution'], errors='coerce')
+        res_mask = mouse_entries['resolution_num'] <= resolution_threshold
+        mouse_entries = mouse_entries[res_mask]
+
+    if mouse_entries.empty:
+        return None
+
+    # Select best structure (lowest resolution)
+    return select_best_mouse_structure(mouse_entries)
+
+
+def select_best_mouse_structure(candidates: pd.DataFrame) -> Optional[dict]:
+    """
+    Select the best mouse antigen structure from candidates.
+
+    Selection criteria:
+    1. Lowest resolution (highest quality)
+    2. Presence of both H and L chains (complete antibody)
+    3. Has antigen chain information
+
+    Args:
+        candidates: DataFrame of candidate mouse structures
+
+    Returns:
+        Dictionary with best structure info or None
+    """
+    if candidates.empty:
+        return None
+
+    # Sort by resolution (ascending = best first)
+    if 'resolution_num' in candidates.columns:
+        sorted_candidates = candidates.sort_values('resolution_num', ascending=True)
+    else:
+        sorted_candidates = candidates
+
+    # Prefer structures with complete antibody (H + L)
+    complete_mask = (
+        sorted_candidates['Hchain'].notna() & (sorted_candidates['Hchain'] != 'NA') &
+        sorted_candidates['Lchain'].notna() & (sorted_candidates['Lchain'] != 'NA')
+    )
+    complete_structures = sorted_candidates[complete_mask]
+
+    if not complete_structures.empty:
+        best = complete_structures.iloc[0]
+    else:
+        best = sorted_candidates.iloc[0]
+
+    return {
+        'pdb': best['pdb'],
+        'antigen_chain': best['antigen_chain'],
+        'antigen_name': best.get('antigen_name', 'Unknown'),
+        'antigen_species': best['antigen_species'],
+        'resolution': best.get('resolution', 'N/A'),
+        'Hchain': best.get('Hchain', 'NA'),
+        'Lchain': best.get('Lchain', 'NA'),
+        'source': 'SAbDab'
+    }
+
+
 if __name__ == "__main__":
     # Test the module
     data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")

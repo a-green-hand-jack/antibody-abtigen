@@ -27,6 +27,10 @@ jobs:
       run: |
         uv sync
 
+    - name: Run unit tests
+      run: |
+        uv run pytest tests/ -v
+
     - name: Run dry-run test with 10 samples
       run: |
         uv run python run.py --limit 10 --dry-run --no-pymol
@@ -49,6 +53,12 @@ jobs:
           echo "Error: Processing log not found"
           exit 1
         fi
+
+        # Check new directory structure
+        echo "=== Directory Structure ==="
+        ls -la data/SAbDab/ || echo "SAbDab directory structure check"
+        ls -la output/HumanMouse/ || echo "HumanMouse directory check"
+        ls -la output/MouseAntigen/ || echo "MouseAntigen directory check"
 
   test-with-structures:
     runs-on: ubuntu-latest

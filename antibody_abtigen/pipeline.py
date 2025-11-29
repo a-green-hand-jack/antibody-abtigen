@@ -24,7 +24,9 @@ from .sabdab import (
     download_sabdab_summary,
     parse_sabdab_summary,
     filter_human_antigen_complexes,
-    get_unique_complexes
+    get_unique_complexes,
+    save_filtered_summary,
+    find_mouse_antigen_in_sabdab
 )
 from .mapping import (
     get_uniprot_from_pdb_chain,
@@ -39,6 +41,7 @@ from .structure import (
     save_structure,
     save_structure_cif,
     save_cif_with_metadata,
+    clean_structure,
     align_structures_pymol,
     align_structures_biopython,
     merge_structures,
@@ -69,6 +72,12 @@ class DataPoint:
     error_message: str = ""
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     human_antigen_chains: List[str] = field(default_factory=list)
+    # New fields for extension modules
+    epitope_identity: Optional[float] = None      # Epitope sequence identity (%)
+    epitope_rmsd: Optional[float] = None          # Epitope structure RMSD (Å)
+    epitope_consistent: Optional[bool] = None     # Whether passes consistency check
+    mouse_structure_source: str = 'RCSB'          # 'SAbDab' | 'RCSB'
+    mouse_gene_name: str = ""                     # Mouse gene name for grouping
 
 
 class CrossSpeciesDatasetPipeline:
@@ -82,7 +91,10 @@ class CrossSpeciesDatasetPipeline:
         output_dir: str,
         resolution_threshold: float = 2.5,
         sequence_identity_threshold: float = 50.0,
-        use_pymol: bool = True
+        use_pymol: bool = True,
+        epitope_rmsd_threshold: float = 1.5,
+        epitope_identity_threshold: float = 80.0,
+        prefer_sabdab_mouse: bool = True
     ):
         """
         Initialize the pipeline.
@@ -93,21 +105,42 @@ class CrossSpeciesDatasetPipeline:
             resolution_threshold: Maximum resolution in Angstroms
             sequence_identity_threshold: Minimum sequence identity percentage
             use_pymol: Use PyMOL for alignment (falls back to Biopython if unavailable)
+            epitope_rmsd_threshold: Epitope RMSD threshold for consistency (Å)
+            epitope_identity_threshold: Epitope sequence identity threshold (%)
+            prefer_sabdab_mouse: Prefer mouse structures from SAbDab over RCSB
         """
         self.data_dir = data_dir
         self.output_dir = output_dir
         self.resolution_threshold = resolution_threshold
         self.sequence_identity_threshold = sequence_identity_threshold
         self.use_pymol = use_pymol and PYMOL_AVAILABLE
+        self.epitope_rmsd_threshold = epitope_rmsd_threshold
+        self.epitope_identity_threshold = epitope_identity_threshold
+        self.prefer_sabdab_mouse = prefer_sabdab_mouse
 
-        # Create directories
-        os.makedirs(data_dir, exist_ok=True)
-        os.makedirs(output_dir, exist_ok=True)
-        os.makedirs(os.path.join(data_dir, "pdb_cache"), exist_ok=True)
+        # New directory structure (following document specification)
+        # SAbDab directories (Phase 1-3)
+        self.sabdab_raw_dir = os.path.join(data_dir, "SAbDab", "raw")
+        self.sabdab_cleaned_dir = os.path.join(data_dir, "SAbDab", "cleaned")
+        self.sabdab_antigen_dir = os.path.join(data_dir, "SAbDab", "antigen")
+        self.sabdab_antibody_dir = os.path.join(data_dir, "SAbDab", "antibody")
+
+        # Output directories (Phase 4-5)
+        self.human_mouse_dir = os.path.join(output_dir, "HumanMouse")
+        self.mouse_antigen_dir = os.path.join(output_dir, "MouseAntigen")
+
+        # Create all directories
+        for d in [
+            self.sabdab_raw_dir, self.sabdab_cleaned_dir,
+            self.sabdab_antigen_dir, self.sabdab_antibody_dir,
+            self.human_mouse_dir, self.mouse_antigen_dir
+        ]:
+            os.makedirs(d, exist_ok=True)
 
         # State tracking
         self.data_points: List[DataPoint] = []
         self.processing_log: List[Dict] = []
+        self.sabdab_full_df: Optional[pd.DataFrame] = None  # Store full SAbDab data for mouse search
 
     def log(self, message: str, level: str = "INFO"):
         """Log a message."""
@@ -169,16 +202,26 @@ class CrossSpeciesDatasetPipeline:
 
         self.log(f"Processing complete: {successful} successful, {failed} failed")
 
-        # Step 4: Generate summary
-        self.log("Step 4: Generating summary CSV")
+        # Step 4: Build mouse antigen library (Phase 5)
+        if not dry_run and successful > 0:
+            self.log("Step 4: Building mouse antigen library")
+            self._build_mouse_antigen_library()
+            self._update_pairs_csv()
+
+        # Step 5: Generate summary
+        self.log("Step 5: Generating summary CSV")
         summary_df = self._generate_summary()
 
         return summary_df
 
     def _load_sabdab_data(self) -> pd.DataFrame:
         """Load SAbDab data, downloading if necessary."""
-        summary_path = download_sabdab_summary(self.data_dir)
-        return parse_sabdab_summary(summary_path)
+        # Download to SAbDab/raw/ directory
+        summary_path = download_sabdab_summary(self.sabdab_raw_dir)
+        full_df = parse_sabdab_summary(summary_path)
+        # Store full dataframe for mouse antigen search
+        self.sabdab_full_df = full_df
+        return full_df
 
     def _process_complex(self, row: pd.Series, dry_run: bool = False) -> Optional[DataPoint]:
         """
@@ -238,76 +281,104 @@ class CrossSpeciesDatasetPipeline:
                 error_message="Could not retrieve UniProt info"
             )
 
-        # Step 3: Find mouse ortholog
-        mouse_info = find_mouse_ortholog(human_uniprot)
-        if not mouse_info:
-            return DataPoint(
-                id=f"DP_{pdb_id}_{antigen_chain}",
-                pdb_id_human=pdb_id,
-                pdb_id_mouse="",
-                human_antigen_chain=antigen_chain,
-                mouse_antigen_chain="",
-                heavy_chain=heavy_chain,
-                light_chain=light_chain,
-                human_uniprot=human_uniprot,
-                mouse_uniprot="",
-                gene_name=human_info.get('gene_name', ''),
-                protein_name=human_info.get('protein_name', ''),
-                sequence_identity=0.0,
-                status="failed",
-                error_message="No mouse ortholog found"
+        # Step 3: Try to find mouse structure (prioritize SAbDab, fallback to RCSB)
+        mouse_pdb_id = None
+        mouse_chain = None
+        mouse_uniprot = ""
+        mouse_gene_name = ""
+        mouse_structure_source = "RCSB"
+        seq_identity = 0.0
+
+        # Step 3a: Try SAbDab first if enabled
+        antigen_name = row.get('antigen_name', '')
+        if self.prefer_sabdab_mouse and self.sabdab_full_df is not None:
+            sabdab_mouse = find_mouse_antigen_in_sabdab(
+                self.sabdab_full_df,
+                antigen_name,
+                human_uniprot,
+                resolution_threshold=self.resolution_threshold
             )
+            if sabdab_mouse:
+                mouse_pdb_id = sabdab_mouse['pdb']
+                mouse_chain = sabdab_mouse['antigen_chain']
+                mouse_gene_name = sabdab_mouse.get('antigen_name', '')
+                mouse_structure_source = "SAbDab"
+                seq_identity = 100.0  # Assume high identity for same-name antigen
+                self.log(f"Found mouse antigen in SAbDab: {mouse_pdb_id} (chain {mouse_chain})")
 
-        # Check sequence identity threshold
-        seq_identity = mouse_info.get('sequence_identity', 0.0)
-        if seq_identity < self.sequence_identity_threshold:
-            return DataPoint(
-                id=f"DP_{pdb_id}_{antigen_chain}",
-                pdb_id_human=pdb_id,
-                pdb_id_mouse="",
-                human_antigen_chain=antigen_chain,
-                mouse_antigen_chain="",
-                heavy_chain=heavy_chain,
-                light_chain=light_chain,
-                human_uniprot=human_uniprot,
-                mouse_uniprot=mouse_info.get('accession', ''),
-                gene_name=human_info.get('gene_name', ''),
-                protein_name=human_info.get('protein_name', ''),
-                sequence_identity=seq_identity,
-                status="failed",
-                error_message=f"Sequence identity {seq_identity:.1f}% below threshold {self.sequence_identity_threshold}%"
+        # Step 3b: Fallback to UniProt/Ensembl ortholog mapping
+        if not mouse_pdb_id:
+            mouse_info = find_mouse_ortholog(human_uniprot)
+            if not mouse_info:
+                return DataPoint(
+                    id=f"DP_{pdb_id}_{antigen_chain}",
+                    pdb_id_human=pdb_id,
+                    pdb_id_mouse="",
+                    human_antigen_chain=antigen_chain,
+                    mouse_antigen_chain="",
+                    heavy_chain=heavy_chain,
+                    light_chain=light_chain,
+                    human_uniprot=human_uniprot,
+                    mouse_uniprot="",
+                    gene_name=human_info.get('gene_name', ''),
+                    protein_name=human_info.get('protein_name', ''),
+                    sequence_identity=0.0,
+                    status="failed",
+                    error_message="No mouse ortholog found"
+                )
+
+            # Check sequence identity threshold
+            seq_identity = mouse_info.get('sequence_identity', 0.0)
+            if seq_identity < self.sequence_identity_threshold:
+                return DataPoint(
+                    id=f"DP_{pdb_id}_{antigen_chain}",
+                    pdb_id_human=pdb_id,
+                    pdb_id_mouse="",
+                    human_antigen_chain=antigen_chain,
+                    mouse_antigen_chain="",
+                    heavy_chain=heavy_chain,
+                    light_chain=light_chain,
+                    human_uniprot=human_uniprot,
+                    mouse_uniprot=mouse_info.get('accession', ''),
+                    gene_name=human_info.get('gene_name', ''),
+                    protein_name=human_info.get('protein_name', ''),
+                    sequence_identity=seq_identity,
+                    status="failed",
+                    error_message=f"Sequence identity {seq_identity:.1f}% below threshold {self.sequence_identity_threshold}%"
+                )
+
+            # Step 4: Find PDB structure for mouse ortholog
+            mouse_uniprot = mouse_info.get('accession', '')
+            mouse_gene_name = mouse_info.get('gene_name', '')
+            mouse_structures = find_pdb_structures_for_uniprot(mouse_uniprot)
+            if not mouse_structures:
+                return DataPoint(
+                    id=f"DP_{pdb_id}_{antigen_chain}",
+                    pdb_id_human=pdb_id,
+                    pdb_id_mouse="",
+                    human_antigen_chain=antigen_chain,
+                    mouse_antigen_chain="",
+                    heavy_chain=heavy_chain,
+                    light_chain=light_chain,
+                    human_uniprot=human_uniprot,
+                    mouse_uniprot=mouse_uniprot,
+                    gene_name=human_info.get('gene_name', ''),
+                    protein_name=human_info.get('protein_name', ''),
+                    sequence_identity=seq_identity,
+                    status="failed",
+                    error_message="No PDB structure found for mouse ortholog"
+                )
+
+            # Select best mouse structure (first one for now, could be improved)
+            mouse_structure_info = mouse_structures[0]
+            mouse_pdb_id = mouse_structure_info['pdb_id']
+
+            # Get chain ID for mouse structure
+            mouse_chains_list = get_pdb_chain_for_entity(
+                mouse_pdb_id,
+                mouse_structure_info['entity_id']
             )
-
-        # Step 4: Find PDB structure for mouse ortholog
-        mouse_structures = find_pdb_structures_for_uniprot(mouse_info['accession'])
-        if not mouse_structures:
-            return DataPoint(
-                id=f"DP_{pdb_id}_{antigen_chain}",
-                pdb_id_human=pdb_id,
-                pdb_id_mouse="",
-                human_antigen_chain=antigen_chain,
-                mouse_antigen_chain="",
-                heavy_chain=heavy_chain,
-                light_chain=light_chain,
-                human_uniprot=human_uniprot,
-                mouse_uniprot=mouse_info.get('accession', ''),
-                gene_name=human_info.get('gene_name', ''),
-                protein_name=human_info.get('protein_name', ''),
-                sequence_identity=seq_identity,
-                status="failed",
-                error_message="No PDB structure found for mouse ortholog"
-            )
-
-        # Select best mouse structure (first one for now, could be improved)
-        mouse_structure_info = mouse_structures[0]
-        mouse_pdb_id = mouse_structure_info['pdb_id']
-
-        # Get chain ID for mouse structure
-        mouse_chains = get_pdb_chain_for_entity(
-            mouse_pdb_id,
-            mouse_structure_info['entity_id']
-        )
-        mouse_chain = mouse_chains[0] if mouse_chains else 'A'
+            mouse_chain = mouse_chains_list[0] if mouse_chains_list else 'A'
 
         if dry_run:
             return DataPoint(
@@ -320,17 +391,19 @@ class CrossSpeciesDatasetPipeline:
                 heavy_chain=heavy_chain,
                 light_chain=light_chain,
                 human_uniprot=human_uniprot,
-                mouse_uniprot=mouse_info.get('accession', ''),
+                mouse_uniprot=mouse_uniprot,
                 gene_name=human_info.get('gene_name', ''),
                 protein_name=human_info.get('protein_name', ''),
                 sequence_identity=seq_identity,
+                mouse_structure_source=mouse_structure_source,
+                mouse_gene_name=mouse_gene_name,
                 status="dry_run",
                 error_message=""
             )
 
         # Step 5: Download and process structures
         try:
-            rmsd = self._process_structures(
+            rmsd, pair_metadata = self._process_structures(
                 pdb_id=pdb_id,
                 antigen_chain=antigen_chain,
                 antigen_chains=antigen_chains,
@@ -339,8 +412,10 @@ class CrossSpeciesDatasetPipeline:
                 mouse_pdb_id=mouse_pdb_id,
                 mouse_chain=mouse_chain,
                 human_uniprot=human_uniprot,
-                mouse_uniprot=mouse_info.get('accession', ''),
-                gene_name=human_info.get('gene_name', '')
+                mouse_uniprot=mouse_uniprot,
+                gene_name=human_info.get('gene_name', ''),
+                mouse_gene_name=mouse_gene_name,
+                mouse_structure_source=mouse_structure_source
             )
 
             return DataPoint(
@@ -352,11 +427,13 @@ class CrossSpeciesDatasetPipeline:
                 heavy_chain=heavy_chain,
                 light_chain=light_chain,
                 human_uniprot=human_uniprot,
-                mouse_uniprot=mouse_info.get('accession', ''),
+                mouse_uniprot=mouse_uniprot,
                 gene_name=human_info.get('gene_name', ''),
                 protein_name=human_info.get('protein_name', ''),
                 sequence_identity=seq_identity,
                 alignment_rmsd=rmsd,
+                mouse_structure_source=mouse_structure_source,
+                mouse_gene_name=mouse_gene_name,
                 status="success",
                 error_message=""
             )
@@ -371,10 +448,12 @@ class CrossSpeciesDatasetPipeline:
                 heavy_chain=heavy_chain,
                 light_chain=light_chain,
                 human_uniprot=human_uniprot,
-                mouse_uniprot=mouse_info.get('accession', ''),
+                mouse_uniprot=mouse_uniprot,
                 gene_name=human_info.get('gene_name', ''),
                 protein_name=human_info.get('protein_name', ''),
                 sequence_identity=seq_identity,
+                mouse_structure_source=mouse_structure_source,
+                mouse_gene_name=mouse_gene_name,
                 status="failed",
                 error_message=f"Structure processing error: {str(e)}"
             )
@@ -390,28 +469,29 @@ class CrossSpeciesDatasetPipeline:
         mouse_chain: str,
         human_uniprot: str,
         mouse_uniprot: str,
-        gene_name: str
-    ) -> float:
+        gene_name: str,
+        mouse_gene_name: str = "",
+        mouse_structure_source: str = "RCSB"
+    ) -> Tuple[float, Dict]:
         """
-        Download, process and align structures.
+        Download, process and align structures following the document's 5-phase structure.
+
+        Phase 1: Download raw structures to SAbDab/raw/
+        Phase 2: Clean structures to SAbDab/cleaned/
+        Phase 3: Split antigen/antibody to SAbDab/antigen/ and SAbDab/antibody/
+        Phase 4: Align human-mouse pairs to HumanMouse/{pair}/
+        Phase 5: Build mouse antigen library (done in separate method)
 
         Returns:
-            Alignment RMSD
+            Tuple of (RMSD, metadata dict)
         """
-        cache_dir = os.path.join(self.data_dir, "pdb_cache")
-
-        # Create output folder for this data point
-        dp_id = f"DP_{pdb_id}_{antigen_chain}"
-        dp_dir = os.path.join(self.output_dir, dp_id)
-        os.makedirs(dp_dir, exist_ok=True)
-
-        # Download human complex structure
-        human_cif, human_pdb = download_structure(pdb_id, cache_dir)
+        # === Phase 1: Download raw structures ===
+        # Download to SAbDab/raw/
+        human_cif, human_pdb = download_structure(pdb_id, self.sabdab_raw_dir)
         if not human_cif and not human_pdb:
             raise ValueError(f"Could not download structure for {pdb_id}")
 
-        # Download mouse antigen structure
-        mouse_cif, mouse_pdb = download_structure(mouse_pdb_id, cache_dir)
+        mouse_cif, mouse_pdb = download_structure(mouse_pdb_id, self.sabdab_raw_dir)
         if not mouse_cif and not mouse_pdb:
             raise ValueError(f"Could not download structure for {mouse_pdb_id}")
 
@@ -425,61 +505,57 @@ class CrossSpeciesDatasetPipeline:
         if not human_structure or not mouse_structure:
             raise ValueError("Could not parse structures")
 
-        # Extract and save antibody (H + L chains)
+        # === Phase 2: Clean structures ===
+        # Determine chains to keep
         antibody_chains = []
         if heavy_chain and heavy_chain != 'NA':
             antibody_chains.append(heavy_chain)
         if light_chain and light_chain != 'NA':
             antibody_chains.append(light_chain)
 
-        # Save antibody
-        antibody_pdb = os.path.join(dp_dir, f"{dp_id}_antibody.pdb")
-        antibody_cif = os.path.join(dp_dir, f"{dp_id}_antibody.cif")
-        save_structure(human_structure, antibody_pdb, chain_ids=antibody_chains)
-        if human_cif:
-            save_cif_with_metadata(human_cif, antibody_cif, chain_ids=antibody_chains)
-        else:
-            save_structure_cif(human_structure, antibody_cif, chain_ids=antibody_chains)
+        all_human_chains = antibody_chains + (antigen_chains if antigen_chains else [antigen_chain])
 
-        # Save human antigen
-        human_ag_pdb = os.path.join(dp_dir, f"{dp_id}_human_ag.pdb")
-        human_ag_cif = os.path.join(dp_dir, f"{dp_id}_human_ag.cif")
-        human_ag_full_pdb = None
-        human_ag_full_cif = None
-        save_structure(human_structure, human_ag_pdb, chain_ids=[antigen_chain])
+        # Clean human complex (keep antigen + antibody, remove water/hetatm)
+        cleaned_human_cif = os.path.join(self.sabdab_cleaned_dir, f"{pdb_id}.cif")
+        if human_cif and not os.path.exists(cleaned_human_cif):
+            clean_structure(human_cif, cleaned_human_cif, all_human_chains)
+
+        # === Phase 3: Split antigen and antibody ===
+        # Save antibody to SAbDab/antibody/
+        antibody_cif = os.path.join(self.sabdab_antibody_dir, f"{pdb_id}_antibody.cif")
+        if human_cif and not os.path.exists(antibody_cif):
+            save_cif_with_metadata(human_cif, antibody_cif, chain_ids=antibody_chains)
+
+        # Save human antigen to SAbDab/antigen/
+        antigen_cif = os.path.join(self.sabdab_antigen_dir, f"{pdb_id}_antigen.cif")
+        if human_cif and not os.path.exists(antigen_cif):
+            ag_chains = antigen_chains if antigen_chains else [antigen_chain]
+            save_cif_with_metadata(human_cif, antigen_cif, chain_ids=ag_chains)
+
+        # === Phase 4: Human-Mouse alignment ===
+        # Create pair directory: HumanMouse/{gene}_{chain}_{mouse_gene}/
+        pair_name = f"{gene_name}_{antigen_chain}_{mouse_gene_name or 'Mouse'}"
+        pair_dir = os.path.join(self.human_mouse_dir, pair_name)
+        os.makedirs(pair_dir, exist_ok=True)
+
+        # Save human antigen chain to pair directory
+        human_ag_cif = os.path.join(pair_dir, "human_ag_chain.cif")
         if human_cif:
             save_cif_with_metadata(human_cif, human_ag_cif, chain_ids=[antigen_chain])
         else:
             save_structure_cif(human_structure, human_ag_cif, chain_ids=[antigen_chain])
 
-        # Save full human antigen (all listed antigen chains)
-        if antigen_chains:
-            human_ag_full_pdb = os.path.join(dp_dir, f"{dp_id}_human_ag_full.pdb")
-            human_ag_full_cif = os.path.join(dp_dir, f"{dp_id}_human_ag_full.cif")
-            save_structure(human_structure, human_ag_full_pdb, chain_ids=antigen_chains)
-            if human_cif:
-                save_cif_with_metadata(human_cif, human_ag_full_cif, chain_ids=antigen_chains)
-            else:
-                save_structure_cif(human_structure, human_ag_full_cif, chain_ids=antigen_chains)
+        # Prepare for alignment
+        human_ag_pdb = os.path.join(pair_dir, "human_ag_chain.pdb")
+        save_structure(human_structure, human_ag_pdb, chain_ids=[antigen_chain])
 
-        # Align mouse antigen to human antigen position
-        mouse_ag_pdb = os.path.join(dp_dir, f"{dp_id}_mouse_ag.pdb")
-        mouse_ag_cif = os.path.join(dp_dir, f"{dp_id}_mouse_ag.cif")
-        mouse_ag_full_pdb = os.path.join(dp_dir, f"{dp_id}_mouse_ag_full.pdb")
-        mouse_ag_full_cif = os.path.join(dp_dir, f"{dp_id}_mouse_ag_full.cif")
-        human_complex_pdb = os.path.join(dp_dir, f"{dp_id}_human_complex.pdb")
-        human_complex_cif = os.path.join(dp_dir, f"{dp_id}_human_complex.cif")
-        mouse_complex_pdb = os.path.join(dp_dir, f"{dp_id}_mouse_complex.pdb")
-        mouse_complex_cif = os.path.join(dp_dir, f"{dp_id}_mouse_complex.cif")
-
-        # First save unaligned mouse structure
+        mouse_ag_pdb = os.path.join(pair_dir, "mouse_ag_unaligned.pdb")
         save_structure(mouse_structure, mouse_ag_pdb, chain_ids=[mouse_chain])
 
         # Perform alignment
         rotran = None
         aligned_structure = mouse_structure
         if self.use_pymol:
-            # Use PyMOL for alignment
             rmsd = align_structures_pymol(
                 mobile_file=mouse_ag_pdb,
                 reference_file=human_ag_pdb,
@@ -489,168 +565,138 @@ class CrossSpeciesDatasetPipeline:
             )
             aligned_structure = parse_structure(mouse_ag_pdb, mouse_pdb_id) or mouse_structure
         else:
-            # Use Biopython for alignment
             rmsd, aligned_structure, rotran = align_structures_biopython(
                 mobile_structure=mouse_structure,
                 reference_structure=human_structure,
                 mobile_chain=mouse_chain,
                 reference_chain=antigen_chain
             )
-            save_structure(aligned_structure, mouse_ag_pdb, chain_ids=[mouse_chain])
 
-        # Save aligned mouse structure as CIF too
-        aligned_mouse = parse_structure(mouse_ag_pdb, "aligned_mouse")
-        if aligned_mouse:
-            if mouse_cif and rotran:
-                # Apply the alignment transform to original mmCIF so metadata is preserved
-                save_cif_with_metadata(
-                    mouse_cif,
-                    mouse_ag_cif,
-                    chain_ids=[mouse_chain],
-                    rotran=rotran
-                )
-            elif mouse_cif:
-                # No transform available (e.g., PyMOL path); fall back to aligned structure output
-                save_structure_cif(aligned_mouse, mouse_ag_cif)
-            else:
-                save_structure_cif(aligned_mouse, mouse_ag_cif)
+        # Save aligned mouse structure
+        mouse_aligned_cif = os.path.join(pair_dir, "mouse_ag_chain_aligned.cif")
+        mouse_aligned_pdb = os.path.join(pair_dir, "mouse_ag_chain_aligned.pdb")
 
-        # Save aligned mouse full structure (all chains)
         if rotran and mouse_cif:
-            save_cif_with_metadata(
-                mouse_cif,
-                mouse_ag_full_cif,
-                chain_ids=None,
-                rotran=rotran
-            )
-        elif mouse_cif:
-            save_structure_cif(aligned_structure, mouse_ag_full_cif)
-        elif aligned_mouse:
-            save_structure_cif(aligned_mouse, mouse_ag_full_cif)
-
-        save_structure(aligned_structure, mouse_ag_full_pdb)
-
-        # Build complexes: antibody + antigen (human) and antibody + aligned mouse antigen
-        complex_chain_ids_human = antibody_chains + (antigen_chains if antigen_chains else [antigen_chain])
-        # Human complex PDB/CIF (metadata from human cif)
-        save_structure(human_structure, human_complex_pdb, chain_ids=complex_chain_ids_human)
-        if human_cif:
-            save_cif_with_metadata(human_cif, human_complex_cif, chain_ids=complex_chain_ids_human)
+            save_cif_with_metadata(mouse_cif, mouse_aligned_cif, chain_ids=[mouse_chain], rotran=rotran)
         else:
-            save_structure_cif(human_structure, human_complex_cif, chain_ids=complex_chain_ids_human)
+            save_structure_cif(aligned_structure, mouse_aligned_cif, chain_ids=[mouse_chain])
 
-        # Mouse complex: merge antibody (human structure) + aligned mouse antigen structure
-        merged_struct = merge_structures(
-            [
-                (human_structure, antibody_chains),
-                (aligned_structure, None)
-            ],
-            new_id=f"{dp_id}_mouse_complex"
-        )
-        save_structure(merged_struct, mouse_complex_pdb)
-        # For CIF, best-effort: combine using antibody metadata; antigen metadata retained if available
-        if human_cif and mouse_cif and rotran:
-            # Start from human CIF (for antibody metadata) and append transformed mouse atom rows
-            try:
-                doc_h = gemmi.cif.read_file(human_cif)
-                block_h = doc_h.sole_block()
-                table = block_h.find_mmcif_category("_atom_site")
-                if not table:
-                    raise ValueError("No atom_site in human CIF")
-                tags = list(table.tags)
-                idx_label = tags.index("_atom_site.label_asym_id") if "_atom_site.label_asym_id" in tags else -1
-                idx_auth = tags.index("_atom_site.auth_asym_id") if "_atom_site.auth_asym_id" in tags else -1
+        save_structure(aligned_structure, mouse_aligned_pdb, chain_ids=[mouse_chain])
 
-                # Keep antibody rows only
-                to_remove = []
-                for i, row in enumerate(table):
-                    label_chain = row[idx_label] if idx_label >= 0 else ""
-                    auth_chain = row[idx_auth] if idx_auth >= 0 else ""
-                    if label_chain not in antibody_chains and auth_chain not in antibody_chains:
-                        to_remove.append(i)
-                for offset, i in enumerate(to_remove):
-                    table.remove_row(i - offset)
+        # Clean up temporary unaligned file
+        if os.path.exists(mouse_ag_pdb):
+            os.remove(mouse_ag_pdb)
 
-                # Append mouse rows (all chains) with transform
-                doc_m = gemmi.cif.read_file(mouse_cif)
-                block_m = doc_m.sole_block()
-                table_m = block_m.find_mmcif_category("_atom_site")
-                if not table_m:
-                    raise ValueError("No atom_site in mouse CIF")
-                tags_m = list(table_m.tags)
-                idx_x = tags.index("_atom_site.Cartn_x") if "_atom_site.Cartn_x" in tags else -1
-                idx_y = tags.index("_atom_site.Cartn_y") if "_atom_site.Cartn_y" in tags else -1
-                idx_z = tags.index("_atom_site.Cartn_z") if "_atom_site.Cartn_z" in tags else -1
-                idx_x_m = tags_m.index("_atom_site.Cartn_x") if "_atom_site.Cartn_x" in tags_m else -1
-                idx_y_m = tags_m.index("_atom_site.Cartn_y") if "_atom_site.Cartn_y" in tags_m else -1
-                idx_z_m = tags_m.index("_atom_site.Cartn_z") if "_atom_site.Cartn_z" in tags_m else -1
-                rot, tran = rotran
-                for row in table_m:
-                    new_row = ["" for _ in range(len(tags))]
-                    for j, tag in enumerate(tags_m):
-                        try:
-                            tgt_idx = tags.index(tag)
-                        except ValueError:
-                            continue
-                        new_row[tgt_idx] = row[j]
-                    if idx_x >= 0 and idx_y >= 0 and idx_z >= 0 and idx_x_m >= 0 and idx_y_m >= 0 and idx_z_m >= 0:
-                        try:
-                            x = float(row[idx_x_m])
-                            y = float(row[idx_y_m])
-                            z = float(row[idx_z_m])
-                            new_x = rot[0][0] * x + rot[0][1] * y + rot[0][2] * z + tran[0]
-                            new_y = rot[1][0] * x + rot[1][1] * y + rot[1][2] * z + tran[1]
-                            new_z = rot[2][0] * x + rot[2][1] * y + rot[2][2] * z + tran[2]
-                            new_row[idx_x] = f"{new_x:.3f}"
-                            new_row[idx_y] = f"{new_y:.3f}"
-                            new_row[idx_z] = f"{new_z:.3f}"
-                        except Exception:
-                            pass
-                    table.append_row(new_row)
-
-                block_h.check_empty_loops("_atom_site")
-                doc_h.write_file(mouse_complex_cif)
-            except Exception as e:
-                self.log(f"Mouse complex CIF fallback for {dp_id}: {e}", level="ERROR")
-                save_structure_cif(merged_struct, mouse_complex_cif)
-        else:
-            save_structure_cif(merged_struct, mouse_complex_cif)
-
-        # Save metadata
-        metadata = {
-            'id': dp_id,
+        # Save metadata for this pair
+        pair_metadata = {
+            'pair_name': pair_name,
             'pdb_id_human': pdb_id,
             'pdb_id_mouse': mouse_pdb_id,
             'human_antigen_chain': antigen_chain,
-            'human_antigen_chains': antigen_chains,
             'mouse_antigen_chain': mouse_chain,
             'antibody_chains': antibody_chains,
             'human_uniprot': human_uniprot,
             'mouse_uniprot': mouse_uniprot,
             'gene_name': gene_name,
+            'mouse_gene_name': mouse_gene_name,
             'alignment_rmsd': rmsd,
+            'mouse_structure_source': mouse_structure_source,
             'files': {
-                'antibody_pdb': os.path.basename(antibody_pdb),
-                'antibody_cif': os.path.basename(antibody_cif),
-                'human_ag_pdb': os.path.basename(human_ag_pdb),
-                'human_ag_cif': os.path.basename(human_ag_cif),
-                'human_ag_full_pdb': os.path.basename(human_ag_full_pdb) if antigen_chains else "",
-                'human_ag_full_cif': os.path.basename(human_ag_full_cif) if antigen_chains else "",
-                'mouse_ag_pdb': os.path.basename(mouse_ag_pdb),
-                'mouse_ag_cif': os.path.basename(mouse_ag_cif),
-                'mouse_ag_full_pdb': os.path.basename(mouse_ag_full_pdb),
-                'mouse_ag_full_cif': os.path.basename(mouse_ag_full_cif),
-                'human_complex_pdb': os.path.basename(human_complex_pdb),
-                'human_complex_cif': os.path.basename(human_complex_cif),
-                'mouse_complex_pdb': os.path.basename(mouse_complex_pdb),
-                'mouse_complex_cif': os.path.basename(mouse_complex_cif)
+                'human_ag_chain': 'human_ag_chain.cif',
+                'mouse_ag_chain_aligned': 'mouse_ag_chain_aligned.cif'
             }
         }
 
-        with open(os.path.join(dp_dir, 'metadata.json'), 'w') as f:
-            json.dump(metadata, f, indent=2)
+        with open(os.path.join(pair_dir, 'metadata.json'), 'w') as f:
+            json.dump(pair_metadata, f, indent=2)
 
-        return rmsd
+        return rmsd, pair_metadata
+
+    def _build_mouse_antigen_library(self) -> Dict[str, str]:
+        """
+        Phase 5: Build mouse antigen library by grouping aligned mouse antigens by gene name.
+
+        Groups all aligned mouse antigen chains by mouse_gene_name and saves them
+        to MouseAntigen/{mouse_gene_name}.cif
+
+        Returns:
+            Dictionary mapping mouse_gene_name to output file path
+        """
+        self.log("Phase 5: Building mouse antigen library")
+
+        # Group successful data points by mouse gene name
+        gene_to_datapoints: Dict[str, List[DataPoint]] = {}
+        for dp in self.data_points:
+            if dp.status == "success" and dp.mouse_gene_name:
+                if dp.mouse_gene_name not in gene_to_datapoints:
+                    gene_to_datapoints[dp.mouse_gene_name] = []
+                gene_to_datapoints[dp.mouse_gene_name].append(dp)
+
+        self.log(f"Found {len(gene_to_datapoints)} unique mouse genes to process")
+
+        library_files: Dict[str, str] = {}
+
+        for gene_name, datapoints in gene_to_datapoints.items():
+            try:
+                # Find the best structure for this gene (lowest RMSD)
+                best_dp = min(datapoints, key=lambda dp: dp.alignment_rmsd or float('inf'))
+
+                # Get the aligned mouse structure from HumanMouse directory
+                pair_name = f"{best_dp.gene_name}_{best_dp.human_antigen_chain}_{gene_name or 'Mouse'}"
+                pair_dir = os.path.join(self.human_mouse_dir, pair_name)
+                aligned_mouse_cif = os.path.join(pair_dir, "mouse_ag_chain_aligned.cif")
+
+                if not os.path.exists(aligned_mouse_cif):
+                    self.log(f"Warning: Aligned mouse structure not found for {gene_name}", level="WARNING")
+                    continue
+
+                # Copy to MouseAntigen directory
+                output_path = os.path.join(self.mouse_antigen_dir, f"{gene_name}.cif")
+                import shutil
+                shutil.copy2(aligned_mouse_cif, output_path)
+
+                library_files[gene_name] = output_path
+                self.log(f"Added {gene_name} to mouse antigen library (from {best_dp.pdb_id_mouse})")
+
+            except Exception as e:
+                self.log(f"Error processing {gene_name}: {e}", level="ERROR")
+
+        self.log(f"Mouse antigen library built with {len(library_files)} entries")
+        return library_files
+
+    def _update_pairs_csv(self):
+        """
+        Generate human_mouse_pairs.csv in HumanMouse/ directory.
+
+        This CSV provides a quick lookup of all human-mouse antigen pairs.
+        """
+        pairs_data = []
+        for dp in self.data_points:
+            if dp.status == "success":
+                pair_name = f"{dp.gene_name}_{dp.human_antigen_chain}_{dp.mouse_gene_name or 'Mouse'}"
+                pairs_data.append({
+                    'pair_name': pair_name,
+                    'human_pdb': dp.pdb_id_human,
+                    'mouse_pdb': dp.pdb_id_mouse,
+                    'human_chain': dp.human_antigen_chain,
+                    'mouse_chain': dp.mouse_antigen_chain,
+                    'human_uniprot': dp.human_uniprot,
+                    'mouse_uniprot': dp.mouse_uniprot,
+                    'human_gene': dp.gene_name,
+                    'mouse_gene': dp.mouse_gene_name,
+                    'sequence_identity': dp.sequence_identity,
+                    'alignment_rmsd': dp.alignment_rmsd,
+                    'mouse_source': dp.mouse_structure_source,
+                    'epitope_consistent': dp.epitope_consistent,
+                    'epitope_rmsd': dp.epitope_rmsd,
+                    'epitope_identity': dp.epitope_identity
+                })
+
+        if pairs_data:
+            pairs_df = pd.DataFrame(pairs_data)
+            csv_path = os.path.join(self.human_mouse_dir, 'human_mouse_pairs.csv')
+            pairs_df.to_csv(csv_path, index=False)
+            self.log(f"Saved {len(pairs_data)} pairs to {csv_path}")
 
     def _generate_summary(self) -> pd.DataFrame:
         """Generate summary CSV file."""

@@ -66,6 +66,24 @@ def cli():
     default=False,
     help='Force re-download of SAbDab summary file'
 )
+@click.option(
+    '--epitope-rmsd',
+    default=1.5,
+    type=float,
+    help='Maximum epitope RMSD threshold in Angstroms (default: 1.5)'
+)
+@click.option(
+    '--epitope-identity',
+    default=80.0,
+    type=float,
+    help='Minimum epitope sequence identity threshold in percent (default: 80.0)'
+)
+@click.option(
+    '--no-sabdab-mouse',
+    is_flag=True,
+    default=False,
+    help='Do not prefer SAbDab mouse structures over RCSB'
+)
 def build_command(
     output: str,
     data_dir: str,
@@ -74,7 +92,10 @@ def build_command(
     identity: float,
     dry_run: bool,
     no_pymol: bool,
-    force_download: bool
+    force_download: bool,
+    epitope_rmsd: float,
+    epitope_identity: float,
+    no_sabdab_mouse: bool
 ):
     """
     Build cross-species antibody-antigen structure dataset.
@@ -94,6 +115,9 @@ def build_command(
     click.echo(f"  Entry limit: {limit if limit else 'All'}")
     click.echo(f"  Resolution threshold: {resolution} A")
     click.echo(f"  Sequence identity threshold: {identity}%")
+    click.echo(f"  Epitope RMSD threshold: {epitope_rmsd} A")
+    click.echo(f"  Epitope identity threshold: {epitope_identity}%")
+    click.echo(f"  Prefer SAbDab mouse: {not no_sabdab_mouse}")
     click.echo(f"  Dry run: {dry_run}")
     click.echo(f"  Use PyMOL: {not no_pymol}")
     click.echo()
@@ -109,7 +133,10 @@ def build_command(
         output_dir=output,
         resolution_threshold=resolution,
         sequence_identity_threshold=identity,
-        use_pymol=not no_pymol
+        use_pymol=not no_pymol,
+        epitope_rmsd_threshold=epitope_rmsd,
+        epitope_identity_threshold=epitope_identity,
+        prefer_sabdab_mouse=not no_sabdab_mouse
     )
 
     if force_download:

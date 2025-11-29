@@ -502,6 +502,93 @@ def save_cif_with_metadata(
     doc.write_file(output_path)
 
 
+def clean_structure(
+    input_cif: str,
+    output_cif: str,
+    keep_chains: List[str],
+    remove_water: bool = True,
+    remove_hetatm: bool = True
+) -> str:
+    """
+    Clean a structure file by keeping specified chains and removing unwanted atoms.
+
+    This is Phase 2 of the pipeline: data cleaning.
+    Output goes to SAbDab/cleaned/{PDB_ID}.cif
+
+    Args:
+        input_cif: Path to the input mmCIF file
+        output_cif: Path to save the cleaned mmCIF
+        keep_chains: List of chain IDs to keep (antigen + antibody chains)
+        remove_water: If True, remove water molecules (HOH)
+        remove_hetatm: If True, remove HETATM records (ligands, non-standard residues)
+
+    Returns:
+        Path to the cleaned output file
+    """
+    if not os.path.exists(input_cif):
+        raise FileNotFoundError(f"Input CIF not found: {input_cif}")
+
+    chain_set = set(keep_chains)
+    doc = gemmi.cif.read_file(input_cif)
+    block = doc.sole_block()
+
+    table = block.find_mmcif_category("_atom_site")
+    if not table:
+        # No atom_site loop; write original doc
+        doc.write_file(output_cif)
+        return output_cif
+
+    tags = list(table.tags)
+
+    def idx(tag: str) -> int:
+        full = tag if tag.startswith("_") else f"_atom_site.{tag}"
+        try:
+            return tags.index(full)
+        except ValueError:
+            return -1
+
+    idx_label = idx("_atom_site.label_asym_id")
+    idx_auth = idx("_atom_site.auth_asym_id")
+    idx_comp = idx("_atom_site.label_comp_id")
+    idx_group = idx("_atom_site.group_PDB")  # ATOM vs HETATM
+
+    rows_to_remove = []
+    for i, row in enumerate(table):
+        label_chain = row[idx_label] if idx_label >= 0 else ""
+        auth_chain = row[idx_auth] if idx_auth >= 0 else ""
+        comp_id = row[idx_comp] if idx_comp >= 0 else ""
+        group = row[idx_group] if idx_group >= 0 else ""
+
+        keep = True
+
+        # Filter by chain
+        if chain_set:
+            keep = (label_chain in chain_set) or (auth_chain in chain_set)
+
+        # Remove water
+        if keep and remove_water and comp_id == "HOH":
+            keep = False
+
+        # Remove HETATM records (non-standard residues, ligands)
+        if keep and remove_hetatm and group == "HETATM":
+            keep = False
+
+        if not keep:
+            rows_to_remove.append(i)
+
+    # Remove rows in reverse order to keep indices valid
+    for offset, row_idx in enumerate(rows_to_remove):
+        table.remove_row(row_idx - offset)
+
+    block.check_empty_loops("_atom_site")
+
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(output_cif), exist_ok=True)
+    doc.write_file(output_cif)
+
+    return output_cif
+
+
 def align_structures_biopython(
     mobile_structure: Structure,
     reference_structure: Structure,
