@@ -471,7 +471,10 @@ def save_cif_with_metadata(
 
         keep = True
         if chain_set:
-            keep = (label_chain in chain_set) or (auth_chain in chain_set)
+            # Only check auth_asym_id since SAbDab uses auth chain IDs
+            # Checking both label_asym_id and auth_asym_id can cause false matches
+            # when label chain 'E' maps to a different auth chain (e.g., 'R')
+            keep = auth_chain in chain_set
         if remove_water and comp_id == "HOH":
             keep = False
 
