@@ -14,6 +14,7 @@ import tempfile
 from typing import Optional, List, Dict, Tuple
 from pathlib import Path
 
+import gemmi
 from Bio.PDB import MMCIFParser, PDBParser, PDBIO, Select, Superimposer
 from Bio.PDB.Structure import Structure
 from Bio.PDB.Chain import Chain
@@ -317,6 +318,67 @@ def extract_chains(
     return builder.get_structure()
 
 
+def merge_structures(
+    parts: List[Tuple[Structure, Optional[List[str]]]],
+    new_id: str = "merged",
+    remove_water: bool = True,
+    remove_hetatm: bool = False
+) -> Structure:
+    """
+    Merge selected chains from multiple structures into a new Structure.
+
+    Args:
+        parts: List of (structure, chain_ids). chain_ids=None keeps all chains.
+        new_id: ID for the merged structure.
+        remove_water: Drop water residues.
+        remove_hetatm: Drop HETATM residues if True.
+    """
+    from Bio.PDB import StructureBuilder
+
+    builder = StructureBuilder.StructureBuilder()
+    builder.init_structure(new_id)
+    builder.init_model(0)
+
+    for structure, chain_ids in parts:
+        model = structure[0]
+        selected_ids = chain_ids if chain_ids is not None else [c.get_id() for c in model]
+
+        for chain_id in selected_ids:
+            if chain_id not in model:
+                continue
+            chain = model[chain_id]
+            builder.init_chain(chain_id)
+
+            for residue in chain:
+                hetflag = residue.get_id()[0]
+
+                if remove_water and hetflag == 'W':
+                    continue
+                if remove_hetatm and hetflag.startswith('H_'):
+                    continue
+
+                builder.init_residue(
+                    residue.get_resname(),
+                    residue.get_id()[0],
+                    residue.get_id()[1],
+                    residue.get_id()[2]
+                )
+
+                for atom in residue:
+                    builder.init_atom(
+                        atom.get_name(),
+                        atom.get_coord(),
+                        atom.get_bfactor(),
+                        atom.get_occupancy(),
+                        atom.get_altloc(),
+                        atom.get_fullname(),
+                        atom.get_serial_number(),
+                        atom.element
+                    )
+
+    return builder.get_structure()
+
+
 def save_structure(structure: Structure, output_path: str, chain_ids: Optional[List[str]] = None):
     """
     Save a structure to PDB format.
@@ -355,12 +417,97 @@ def save_structure_cif(structure: Structure, output_path: str, chain_ids: Option
         io.save(output_path)
 
 
+def save_cif_with_metadata(
+    source_cif: str,
+    output_path: str,
+    chain_ids: Optional[List[str]] = None,
+    rotran: Optional[Tuple] = None,
+    remove_water: bool = True
+):
+    """
+    Save a chain-filtered mmCIF while retaining metadata categories (entity, entity_poly_seq, etc.).
+
+    Args:
+        source_cif: Path to the original mmCIF file
+        output_path: Where to write the filtered mmCIF
+        chain_ids: Chain IDs to keep (matches label_asym_id or auth_asym_id). None keeps all.
+        rotran: Optional rotation/translation tuple from Biopython Superimposer
+        remove_water: If True, drop HOH waters
+    """
+    if not source_cif or not os.path.exists(source_cif):
+        raise FileNotFoundError(f"source CIF not found: {source_cif}")
+
+    chain_set = set(chain_ids) if chain_ids else None
+    doc = gemmi.cif.read_file(source_cif)
+    block = doc.sole_block()
+
+    table = block.find_mmcif_category("_atom_site")
+    if not table:
+        # No atom_site loop; write original doc to preserve metadata
+        doc.write_file(output_path)
+        return
+
+    tags = list(table.tags)
+
+    def idx(tag: str) -> int:
+        full = tag if tag.startswith("_") else f"_atom_site.{tag}"
+        try:
+            return tags.index(full)
+        except ValueError:
+            return -1
+
+    idx_label = idx("_atom_site.label_asym_id")
+    idx_auth = idx("_atom_site.auth_asym_id")
+    idx_comp = idx("_atom_site.label_comp_id")
+    idx_x = idx("_atom_site.Cartn_x")
+    idx_y = idx("_atom_site.Cartn_y")
+    idx_z = idx("_atom_site.Cartn_z")
+
+    rows_to_remove = []
+    for i, row in enumerate(table):
+        label_chain = row[idx_label] if idx_label >= 0 else ""
+        auth_chain = row[idx_auth] if idx_auth >= 0 else ""
+        comp_id = row[idx_comp] if idx_comp >= 0 else ""
+
+        keep = True
+        if chain_set:
+            keep = (label_chain in chain_set) or (auth_chain in chain_set)
+        if remove_water and comp_id == "HOH":
+            keep = False
+
+        if not keep:
+            rows_to_remove.append(i)
+            continue
+
+        if rotran and idx_x >= 0 and idx_y >= 0 and idx_z >= 0:
+            rot, tran = rotran
+            try:
+                x = float(row[idx_x])
+                y = float(row[idx_y])
+                z = float(row[idx_z])
+            except ValueError:
+                continue
+            new_x = rot[0][0] * x + rot[0][1] * y + rot[0][2] * z + tran[0]
+            new_y = rot[1][0] * x + rot[1][1] * y + rot[1][2] * z + tran[1]
+            new_z = rot[2][0] * x + rot[2][1] * y + rot[2][2] * z + tran[2]
+            row[idx_x] = f"{new_x:.3f}"
+            row[idx_y] = f"{new_y:.3f}"
+            row[idx_z] = f"{new_z:.3f}"
+
+    # Remove rows in reverse order to keep indices valid
+    for offset, row_idx in enumerate(rows_to_remove):
+        table.remove_row(row_idx - offset)
+
+    block.check_empty_loops("_atom_site")
+    doc.write_file(output_path)
+
+
 def align_structures_biopython(
     mobile_structure: Structure,
     reference_structure: Structure,
     mobile_chain: str,
     reference_chain: str
-) -> Tuple[float, Structure]:
+) -> Tuple[float, Structure, Tuple]:
     """
     Align mobile structure to reference using Biopython Superimposer.
 
@@ -373,7 +520,7 @@ def align_structures_biopython(
         reference_chain: Chain ID in reference structure
 
     Returns:
-        Tuple of (RMSD, aligned structure)
+        Tuple of (RMSD, aligned structure, (rotation matrix, translation vector))
     """
     from Bio.Align import PairwiseAligner
     from Bio.SeqUtils import seq1
@@ -445,7 +592,7 @@ def align_structures_biopython(
 
     rmsd = super_imposer.rms
 
-    return rmsd, mobile_structure
+    return rmsd, mobile_structure, super_imposer.rotran
 
 
 def align_structures_pymol(

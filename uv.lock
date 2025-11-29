@@ -30,6 +30,11 @@ pymol = [
     { name = "pymol-open-source", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "biopython", specifier = ">=1.80" },
@@ -44,6 +49,9 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.60" },
 ]
 provides-extras = ["pymol", "dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.1" }]
 
 [[package]]
 name = "biopython"

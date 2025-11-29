@@ -16,6 +16,7 @@ from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 
+import gemmi
 import pandas as pd
 from tqdm import tqdm
 
@@ -37,8 +38,10 @@ from .structure import (
     parse_structure,
     save_structure,
     save_structure_cif,
+    save_cif_with_metadata,
     align_structures_pymol,
     align_structures_biopython,
+    merge_structures,
     ChainSelect,
     PYMOL_AVAILABLE
 )
@@ -65,6 +68,7 @@ class DataPoint:
     status: str = "pending"
     error_message: str = ""
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    human_antigen_chains: List[str] = field(default_factory=list)
 
 
 class CrossSpeciesDatasetPipeline:
@@ -188,7 +192,9 @@ class CrossSpeciesDatasetPipeline:
             DataPoint or None
         """
         pdb_id = row['pdb']
-        antigen_chain = str(row['antigen_chain']).split('|')[0].strip()  # Take first chain if multiple
+        antigen_chain_raw = str(row['antigen_chain'])
+        antigen_chains = [c.strip() for c in antigen_chain_raw.split('|') if c.strip()]
+        antigen_chain = antigen_chains[0] if antigen_chains else antigen_chain_raw.strip()
         heavy_chain = row['Hchain']
         light_chain = row['Lchain']
 
@@ -309,6 +315,7 @@ class CrossSpeciesDatasetPipeline:
                 pdb_id_human=pdb_id,
                 pdb_id_mouse=mouse_pdb_id,
                 human_antigen_chain=antigen_chain,
+                human_antigen_chains=antigen_chains,
                 mouse_antigen_chain=mouse_chain,
                 heavy_chain=heavy_chain,
                 light_chain=light_chain,
@@ -326,6 +333,7 @@ class CrossSpeciesDatasetPipeline:
             rmsd = self._process_structures(
                 pdb_id=pdb_id,
                 antigen_chain=antigen_chain,
+                antigen_chains=antigen_chains,
                 heavy_chain=heavy_chain,
                 light_chain=light_chain,
                 mouse_pdb_id=mouse_pdb_id,
@@ -375,6 +383,7 @@ class CrossSpeciesDatasetPipeline:
         self,
         pdb_id: str,
         antigen_chain: str,
+        antigen_chains: List[str],
         heavy_chain: str,
         light_chain: str,
         mouse_pdb_id: str,
@@ -427,22 +436,48 @@ class CrossSpeciesDatasetPipeline:
         antibody_pdb = os.path.join(dp_dir, f"{dp_id}_antibody.pdb")
         antibody_cif = os.path.join(dp_dir, f"{dp_id}_antibody.cif")
         save_structure(human_structure, antibody_pdb, chain_ids=antibody_chains)
-        save_structure_cif(human_structure, antibody_cif, chain_ids=antibody_chains)
+        if human_cif:
+            save_cif_with_metadata(human_cif, antibody_cif, chain_ids=antibody_chains)
+        else:
+            save_structure_cif(human_structure, antibody_cif, chain_ids=antibody_chains)
 
         # Save human antigen
         human_ag_pdb = os.path.join(dp_dir, f"{dp_id}_human_ag.pdb")
         human_ag_cif = os.path.join(dp_dir, f"{dp_id}_human_ag.cif")
+        human_ag_full_pdb = None
+        human_ag_full_cif = None
         save_structure(human_structure, human_ag_pdb, chain_ids=[antigen_chain])
-        save_structure_cif(human_structure, human_ag_cif, chain_ids=[antigen_chain])
+        if human_cif:
+            save_cif_with_metadata(human_cif, human_ag_cif, chain_ids=[antigen_chain])
+        else:
+            save_structure_cif(human_structure, human_ag_cif, chain_ids=[antigen_chain])
+
+        # Save full human antigen (all listed antigen chains)
+        if antigen_chains:
+            human_ag_full_pdb = os.path.join(dp_dir, f"{dp_id}_human_ag_full.pdb")
+            human_ag_full_cif = os.path.join(dp_dir, f"{dp_id}_human_ag_full.cif")
+            save_structure(human_structure, human_ag_full_pdb, chain_ids=antigen_chains)
+            if human_cif:
+                save_cif_with_metadata(human_cif, human_ag_full_cif, chain_ids=antigen_chains)
+            else:
+                save_structure_cif(human_structure, human_ag_full_cif, chain_ids=antigen_chains)
 
         # Align mouse antigen to human antigen position
         mouse_ag_pdb = os.path.join(dp_dir, f"{dp_id}_mouse_ag.pdb")
         mouse_ag_cif = os.path.join(dp_dir, f"{dp_id}_mouse_ag.cif")
+        mouse_ag_full_pdb = os.path.join(dp_dir, f"{dp_id}_mouse_ag_full.pdb")
+        mouse_ag_full_cif = os.path.join(dp_dir, f"{dp_id}_mouse_ag_full.cif")
+        human_complex_pdb = os.path.join(dp_dir, f"{dp_id}_human_complex.pdb")
+        human_complex_cif = os.path.join(dp_dir, f"{dp_id}_human_complex.cif")
+        mouse_complex_pdb = os.path.join(dp_dir, f"{dp_id}_mouse_complex.pdb")
+        mouse_complex_cif = os.path.join(dp_dir, f"{dp_id}_mouse_complex.cif")
 
         # First save unaligned mouse structure
         save_structure(mouse_structure, mouse_ag_pdb, chain_ids=[mouse_chain])
 
         # Perform alignment
+        rotran = None
+        aligned_structure = mouse_structure
         if self.use_pymol:
             # Use PyMOL for alignment
             rmsd = align_structures_pymol(
@@ -452,9 +487,10 @@ class CrossSpeciesDatasetPipeline:
                 mobile_chain=mouse_chain,
                 reference_chain=antigen_chain
             )
+            aligned_structure = parse_structure(mouse_ag_pdb, mouse_pdb_id) or mouse_structure
         else:
             # Use Biopython for alignment
-            rmsd, aligned_structure = align_structures_biopython(
+            rmsd, aligned_structure, rotran = align_structures_biopython(
                 mobile_structure=mouse_structure,
                 reference_structure=human_structure,
                 mobile_chain=mouse_chain,
@@ -465,7 +501,120 @@ class CrossSpeciesDatasetPipeline:
         # Save aligned mouse structure as CIF too
         aligned_mouse = parse_structure(mouse_ag_pdb, "aligned_mouse")
         if aligned_mouse:
-            save_structure_cif(aligned_mouse, mouse_ag_cif)
+            if mouse_cif and rotran:
+                # Apply the alignment transform to original mmCIF so metadata is preserved
+                save_cif_with_metadata(
+                    mouse_cif,
+                    mouse_ag_cif,
+                    chain_ids=[mouse_chain],
+                    rotran=rotran
+                )
+            elif mouse_cif:
+                # No transform available (e.g., PyMOL path); fall back to aligned structure output
+                save_structure_cif(aligned_mouse, mouse_ag_cif)
+            else:
+                save_structure_cif(aligned_mouse, mouse_ag_cif)
+
+        # Save aligned mouse full structure (all chains)
+        if rotran and mouse_cif:
+            save_cif_with_metadata(
+                mouse_cif,
+                mouse_ag_full_cif,
+                chain_ids=None,
+                rotran=rotran
+            )
+        elif mouse_cif:
+            save_structure_cif(aligned_structure, mouse_ag_full_cif)
+        elif aligned_mouse:
+            save_structure_cif(aligned_mouse, mouse_ag_full_cif)
+
+        save_structure(aligned_structure, mouse_ag_full_pdb)
+
+        # Build complexes: antibody + antigen (human) and antibody + aligned mouse antigen
+        complex_chain_ids_human = antibody_chains + (antigen_chains if antigen_chains else [antigen_chain])
+        # Human complex PDB/CIF (metadata from human cif)
+        save_structure(human_structure, human_complex_pdb, chain_ids=complex_chain_ids_human)
+        if human_cif:
+            save_cif_with_metadata(human_cif, human_complex_cif, chain_ids=complex_chain_ids_human)
+        else:
+            save_structure_cif(human_structure, human_complex_cif, chain_ids=complex_chain_ids_human)
+
+        # Mouse complex: merge antibody (human structure) + aligned mouse antigen structure
+        merged_struct = merge_structures(
+            [
+                (human_structure, antibody_chains),
+                (aligned_structure, None)
+            ],
+            new_id=f"{dp_id}_mouse_complex"
+        )
+        save_structure(merged_struct, mouse_complex_pdb)
+        # For CIF, best-effort: combine using antibody metadata; antigen metadata retained if available
+        if human_cif and mouse_cif and rotran:
+            # Start from human CIF (for antibody metadata) and append transformed mouse atom rows
+            try:
+                doc_h = gemmi.cif.read_file(human_cif)
+                block_h = doc_h.sole_block()
+                table = block_h.find_mmcif_category("_atom_site")
+                if not table:
+                    raise ValueError("No atom_site in human CIF")
+                tags = list(table.tags)
+                idx_label = tags.index("_atom_site.label_asym_id") if "_atom_site.label_asym_id" in tags else -1
+                idx_auth = tags.index("_atom_site.auth_asym_id") if "_atom_site.auth_asym_id" in tags else -1
+
+                # Keep antibody rows only
+                to_remove = []
+                for i, row in enumerate(table):
+                    label_chain = row[idx_label] if idx_label >= 0 else ""
+                    auth_chain = row[idx_auth] if idx_auth >= 0 else ""
+                    if label_chain not in antibody_chains and auth_chain not in antibody_chains:
+                        to_remove.append(i)
+                for offset, i in enumerate(to_remove):
+                    table.remove_row(i - offset)
+
+                # Append mouse rows (all chains) with transform
+                doc_m = gemmi.cif.read_file(mouse_cif)
+                block_m = doc_m.sole_block()
+                table_m = block_m.find_mmcif_category("_atom_site")
+                if not table_m:
+                    raise ValueError("No atom_site in mouse CIF")
+                tags_m = list(table_m.tags)
+                idx_x = tags.index("_atom_site.Cartn_x") if "_atom_site.Cartn_x" in tags else -1
+                idx_y = tags.index("_atom_site.Cartn_y") if "_atom_site.Cartn_y" in tags else -1
+                idx_z = tags.index("_atom_site.Cartn_z") if "_atom_site.Cartn_z" in tags else -1
+                idx_x_m = tags_m.index("_atom_site.Cartn_x") if "_atom_site.Cartn_x" in tags_m else -1
+                idx_y_m = tags_m.index("_atom_site.Cartn_y") if "_atom_site.Cartn_y" in tags_m else -1
+                idx_z_m = tags_m.index("_atom_site.Cartn_z") if "_atom_site.Cartn_z" in tags_m else -1
+                rot, tran = rotran
+                for row in table_m:
+                    new_row = ["" for _ in range(len(tags))]
+                    for j, tag in enumerate(tags_m):
+                        try:
+                            tgt_idx = tags.index(tag)
+                        except ValueError:
+                            continue
+                        new_row[tgt_idx] = row[j]
+                    if idx_x >= 0 and idx_y >= 0 and idx_z >= 0 and idx_x_m >= 0 and idx_y_m >= 0 and idx_z_m >= 0:
+                        try:
+                            x = float(row[idx_x_m])
+                            y = float(row[idx_y_m])
+                            z = float(row[idx_z_m])
+                            new_x = rot[0][0] * x + rot[0][1] * y + rot[0][2] * z + tran[0]
+                            new_y = rot[1][0] * x + rot[1][1] * y + rot[1][2] * z + tran[1]
+                            new_z = rot[2][0] * x + rot[2][1] * y + rot[2][2] * z + tran[2]
+                            new_row[idx_x] = f"{new_x:.3f}"
+                            new_row[idx_y] = f"{new_y:.3f}"
+                            new_row[idx_z] = f"{new_z:.3f}"
+                        except Exception:
+                            pass
+                    table.append_row(new_row)
+
+                block_h.check_empty_loops("_atom_site")
+                doc_h.write_file(mouse_complex_cif)
+            except Exception as e:
+                self.log(f"Mouse complex CIF fallback for {dp_id}: {e}", level="ERROR")
+                save_structure_cif(merged_struct, mouse_complex_cif)
+        else:
+            save_structure_cif(merged_struct, mouse_complex_cif)
 
         # Save metadata
         metadata = {
@@ -473,6 +622,7 @@ class CrossSpeciesDatasetPipeline:
             'pdb_id_human': pdb_id,
             'pdb_id_mouse': mouse_pdb_id,
             'human_antigen_chain': antigen_chain,
+            'human_antigen_chains': antigen_chains,
             'mouse_antigen_chain': mouse_chain,
             'antibody_chains': antibody_chains,
             'human_uniprot': human_uniprot,
@@ -484,8 +634,16 @@ class CrossSpeciesDatasetPipeline:
                 'antibody_cif': os.path.basename(antibody_cif),
                 'human_ag_pdb': os.path.basename(human_ag_pdb),
                 'human_ag_cif': os.path.basename(human_ag_cif),
+                'human_ag_full_pdb': os.path.basename(human_ag_full_pdb) if antigen_chains else "",
+                'human_ag_full_cif': os.path.basename(human_ag_full_cif) if antigen_chains else "",
                 'mouse_ag_pdb': os.path.basename(mouse_ag_pdb),
-                'mouse_ag_cif': os.path.basename(mouse_ag_cif)
+                'mouse_ag_cif': os.path.basename(mouse_ag_cif),
+                'mouse_ag_full_pdb': os.path.basename(mouse_ag_full_pdb),
+                'mouse_ag_full_cif': os.path.basename(mouse_ag_full_cif),
+                'human_complex_pdb': os.path.basename(human_complex_pdb),
+                'human_complex_cif': os.path.basename(human_complex_cif),
+                'mouse_complex_pdb': os.path.basename(mouse_complex_pdb),
+                'mouse_complex_cif': os.path.basename(mouse_complex_cif)
             }
         }
 

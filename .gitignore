@@ -16,9 +16,13 @@ ENV/
 data/
 output/
 
+# Test outputs (keep structure but not contents)
+tests/outputs/*
+!tests/outputs/.gitkeep
+
 # IDE
 .idea/
-.vscode/
+# .vscode/  # Keep VSCode settings in repo
 *.swp
 *.swo
 *~
@@ -36,6 +40,18 @@ Thumbs.db
 # Local settings
 .env
 .env.local
+# Keep .env.example in repo
 
 # Claude settings
 .claude/
+
+# pytest cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+
+# ruff
+.ruff_cache/
