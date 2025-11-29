@@ -22,7 +22,7 @@ Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 # In your project, add as dependency
 uv add git+https://github.com/a-green-hand-jack/antibody-abtigen.git
 
-# Or with PyMOL support (optional, for better alignment)
+# Or with PyMOL support (macOS/Windows only, for better alignment)
 uv add "antibody-abtigen[pymol] @ git+https://github.com/a-green-hand-jack/antibody-abtigen.git"
 ```
 
@@ -36,9 +36,11 @@ cd antibody-abtigen
 # Install dependencies
 uv sync
 
-# Or install with PyMOL support
+# Or install with PyMOL support (macOS/Windows only)
 uv sync --extra pymol
 ```
+
+> **Note on PyMOL**: The `pymol-open-source` package is only available for macOS, Windows, and some Linux distributions. On unsupported platforms (e.g., RHEL-based Linux), the package will still work using Biopython for structure alignment, which provides good results (typically ~2-3 Å RMSD vs ~1-2 Å with PyMOL).
 
 ## Usage
 

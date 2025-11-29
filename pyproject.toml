@@ -29,7 +29,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pymol = ["pymol-open-source>=3.0"]
+# PyMOL is optional and only available on certain platforms (macOS, Windows, some Linux)
+# On unsupported platforms, Biopython alignment will be used automatically
+pymol = [
+    "pymol-open-source>=3.0; sys_platform == 'darwin' or sys_platform == 'win32'"
+]
 dev = ["ruff", "pytest"]
 
 [project.scripts]
