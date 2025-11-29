@@ -16,32 +16,105 @@ A pipeline for building cross-species antibody-antigen structure datasets from S
 
 Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 
+### Option 1: Install from GitHub (recommended for using as a package)
+
+```bash
+# In your project, add as dependency
+uv add git+https://github.com/a-green-hand-jack/antibody-abtigen.git
+
+# Or with PyMOL support (optional, for better alignment)
+uv add "antibody-abtigen[pymol] @ git+https://github.com/a-green-hand-jack/antibody-abtigen.git"
+```
+
+### Option 2: Clone and develop locally
+
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/antibody_abtigen.git
-cd antibody_abtigen
+git clone https://github.com/a-green-hand-jack/antibody-abtigen.git
+cd antibody-abtigen
 
 # Install dependencies
 uv sync
+
+# Or install with PyMOL support
+uv sync --extra pymol
 ```
 
 ## Usage
 
+### As a CLI tool
+
+```bash
+# If installed as package
+antibody-abtigen --help
+antibody-abtigen --limit 10 --dry-run
+
+# Or run directly from repo
+uv run python run.py --limit 10 --dry-run
+```
+
+### As a Python library
+
+```python
+from antibody_abtigen import CrossSpeciesDatasetPipeline
+
+# Create pipeline
+pipeline = CrossSpeciesDatasetPipeline(
+    data_dir="./data",
+    output_dir="./output",
+    resolution_threshold=2.5,
+    sequence_identity_threshold=50.0,
+    use_pymol=False  # Use Biopython for alignment
+)
+
+# Run with limit
+result_df = pipeline.run(limit=10, dry_run=False)
+
+# Check results
+print(f"Successful: {len(result_df[result_df['status'] == 'success'])}")
+```
+
+### Using individual modules
+
+```python
+from antibody_abtigen import (
+    download_sabdab_summary,
+    filter_human_antigen_complexes,
+    get_uniprot_from_pdb_chain,
+    find_mouse_ortholog,
+    download_structure,
+    align_structures_biopython,
+)
+
+# Download SAbDab data
+summary_path = download_sabdab_summary("./data")
+
+# Get UniProt ID from PDB
+uniprot_id = get_uniprot_from_pdb_chain("5FUO", "A")
+
+# Find mouse ortholog
+mouse_info = find_mouse_ortholog(uniprot_id)
+print(f"Mouse ortholog: {mouse_info['accession']}")
+print(f"Sequence identity: {mouse_info['sequence_identity']:.1f}%")
+```
+
+### CLI Examples
+
 ```bash
 # Run with default settings (all data)
-uv run python run.py
+antibody-abtigen
 
 # Demo mode with limited entries
-uv run python run.py --limit 10
+antibody-abtigen --limit 10
 
 # Dry-run mode (analysis only, no structure downloads)
-uv run python run.py --limit 50 --dry-run
+antibody-abtigen --limit 50 --dry-run
 
 # Custom thresholds
-uv run python run.py --resolution 3.0 --identity 60 --limit 100
+antibody-abtigen --resolution 3.0 --identity 60 --limit 100
 
 # Use Biopython instead of PyMOL for alignment
-uv run python run.py --no-pymol
+antibody-abtigen --no-pymol
 ```
 
 ### Command Line Options

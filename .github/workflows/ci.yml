@@ -121,5 +121,5 @@ jobs:
 
     - name: Run linter
       run: |
-        uv run ruff check src/ run.py --ignore E501
+        uv run ruff check antibody_abtigen/ run.py --ignore E501
       continue-on-error: true  # Don't fail on lint errors for now
