@@ -19,6 +19,15 @@ from .structure import (
     parse_structure,
     align_structures_biopython,
     align_structures_pymol,
+    setup_pymol,
+    is_pymol_available,
+    get_pymol_info,
+)
+from .pymol_env import (
+    setup_pymol_env,
+    find_pymol_env,
+    get_pymol_python,
+    verify_pymol,
 )
 
 __all__ = [
@@ -32,4 +41,12 @@ __all__ = [
     "parse_structure",
     "align_structures_biopython",
     "align_structures_pymol",
+    # PyMOL environment management
+    "setup_pymol",
+    "is_pymol_available",
+    "get_pymol_info",
+    "setup_pymol_env",
+    "find_pymol_env",
+    "get_pymol_python",
+    "verify_pymol",
 ]

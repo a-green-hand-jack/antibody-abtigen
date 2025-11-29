@@ -40,7 +40,38 @@ uv sync
 uv sync --extra pymol
 ```
 
-> **Note on PyMOL**: The `pymol-open-source` package is only available for macOS, Windows, and some Linux distributions. On unsupported platforms (e.g., RHEL-based Linux), the package will still work using Biopython for structure alignment, which provides good results (typically ~2-3 Å RMSD vs ~1-2 Å with PyMOL).
+> **Note on PyMOL**: The `pymol-open-source` package from PyPI is only available for macOS, Windows, and some Linux distributions. On unsupported platforms (e.g., RHEL-based Linux), see the [PyMOL on Linux](#pymol-on-linux-hpc-clusters) section below.
+
+### PyMOL on Linux (HPC clusters)
+
+On Linux systems where `pymol-open-source` from PyPI is not available, the package can automatically detect and use PyMOL from a conda/mamba environment:
+
+```bash
+# Create a conda environment with PyMOL (one-time setup)
+mamba create -n pymol-env -c conda-forge pymol-open-source python=3.11 -y
+
+# The package will automatically detect and use this environment
+```
+
+You can also programmatically check and set up PyMOL:
+
+```python
+from antibody_abtigen import setup_pymol, is_pymol_available, get_pymol_info
+
+# Check PyMOL status
+print(get_pymol_info())
+# {'available': True, 'python_path': '/path/to/pymol-env/bin/python', 'method': 'conda'}
+
+# Or setup with auto-create (will create pymol-env if not found)
+success, message = setup_pymol(auto_create=True)
+print(message)
+```
+
+The package searches for PyMOL in this order:
+1. macOS PyMOL.app (`/Applications/PyMOL.app`)
+2. Direct Python import (`import pymol`)
+3. Conda environments named `pymol-env`, `pymol`, or `pymol-open-source`
+4. Any conda environment with PyMOL installed
 
 ## Usage
 

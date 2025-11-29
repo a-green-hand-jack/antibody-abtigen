@@ -19,23 +19,131 @@ from Bio.PDB.Structure import Structure
 from Bio.PDB.Chain import Chain
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 
-# Try to import PyMOL
+# PyMOL environment settings
 PYMOL_AVAILABLE = False
+PYMOL_PYTHON_PATH = None  # Path to Python with PyMOL (conda env or PyMOL.app)
 PYMOL_APP_PYTHON = "/Applications/PyMOL.app/Contents/bin/python"
 
-try:
-    import pymol
-    from pymol import cmd
-    # Test if it actually works
-    pymol.finish_launching(['pymol', '-qc'])
-    PYMOL_AVAILABLE = True
-except (ImportError, Exception) as e:
-    # Check if PyMOL.app is available as fallback
+# Lazy initialization flag
+_pymol_initialized = False
+
+
+def _init_pymol():
+    """Initialize PyMOL availability check (lazy loading)."""
+    global PYMOL_AVAILABLE, PYMOL_PYTHON_PATH, _pymol_initialized
+
+    if _pymol_initialized:
+        return
+
+    _pymol_initialized = True
+
+    # First check macOS PyMOL.app
     if os.path.exists(PYMOL_APP_PYTHON):
         PYMOL_AVAILABLE = True
-        print("Using PyMOL.app for alignment.")
-    else:
-        print("Warning: PyMOL not available. Using Biopython for alignment.")
+        PYMOL_PYTHON_PATH = PYMOL_APP_PYTHON
+        return
+
+    # Try to import PyMOL directly
+    try:
+        import pymol
+        from pymol import cmd
+        pymol.finish_launching(['pymol', '-qc'])
+        PYMOL_AVAILABLE = True
+        PYMOL_PYTHON_PATH = None  # Use direct import
+        return
+    except (ImportError, Exception):
+        pass
+
+    # Try to find conda PyMOL environment
+    try:
+        from .pymol_env import find_pymol_env, get_pymol_python, verify_pymol
+
+        env_path = find_pymol_env()
+        if env_path:
+            python_path = get_pymol_python(env_path)
+            if python_path:
+                ok, _ = verify_pymol(python_path)
+                if ok:
+                    PYMOL_AVAILABLE = True
+                    PYMOL_PYTHON_PATH = python_path
+                    return
+    except ImportError:
+        pass
+
+
+def setup_pymol(auto_create: bool = False) -> Tuple[bool, str]:
+    """
+    Setup PyMOL for structure alignment.
+
+    This function will:
+    1. Check for macOS PyMOL.app
+    2. Check for direct PyMOL import
+    3. Search for existing conda pymol-env
+    4. Optionally create a new conda environment with PyMOL
+
+    Args:
+        auto_create: If True, create conda environment if not found
+
+    Returns:
+        Tuple of (success, message)
+    """
+    global PYMOL_AVAILABLE, PYMOL_PYTHON_PATH, _pymol_initialized
+
+    _pymol_initialized = True
+
+    # Check macOS PyMOL.app
+    if os.path.exists(PYMOL_APP_PYTHON):
+        PYMOL_AVAILABLE = True
+        PYMOL_PYTHON_PATH = PYMOL_APP_PYTHON
+        return True, "Using PyMOL.app"
+
+    # Try direct import
+    try:
+        import pymol
+        from pymol import cmd
+        pymol.finish_launching(['pymol', '-qc'])
+        PYMOL_AVAILABLE = True
+        PYMOL_PYTHON_PATH = None
+        return True, "Using PyMOL module"
+    except (ImportError, Exception):
+        pass
+
+    # Try conda environment
+    try:
+        from .pymol_env import setup_pymol_env, verify_pymol
+
+        success, python_path, message = setup_pymol_env(auto_create=auto_create)
+
+        if success and python_path:
+            ok, version = verify_pymol(python_path)
+            if ok:
+                PYMOL_AVAILABLE = True
+                PYMOL_PYTHON_PATH = python_path
+                return True, f"{message} ({version})"
+
+        return False, message
+
+    except ImportError as e:
+        return False, f"PyMOL environment module not available: {e}"
+
+
+def is_pymol_available() -> bool:
+    """Check if PyMOL is available for alignment."""
+    _init_pymol()
+    return PYMOL_AVAILABLE
+
+
+def get_pymol_info() -> dict:
+    """Get information about the PyMOL setup."""
+    _init_pymol()
+    return {
+        "available": PYMOL_AVAILABLE,
+        "python_path": PYMOL_PYTHON_PATH,
+        "method": "PyMOL.app" if PYMOL_PYTHON_PATH == PYMOL_APP_PYTHON
+                  else "conda" if PYMOL_PYTHON_PATH
+                  else "module" if PYMOL_AVAILABLE
+                  else "none"
+    }
 
 
 PDB_DOWNLOAD_URL = "https://files.rcsb.org/download/{pdb_id}.cif"
@@ -360,35 +468,44 @@ def align_structures_pymol(
     Returns:
         RMSD after alignment
     """
-    if not PYMOL_AVAILABLE:
-        raise ImportError("PyMOL is not available")
+    _init_pymol()
 
-    # Try using PyMOL.app first (more reliable on macOS)
-    if os.path.exists(PYMOL_APP_PYTHON):
-        return _align_via_pymol_app(
+    if not PYMOL_AVAILABLE:
+        raise ImportError("PyMOL is not available. Use setup_pymol() to configure it.")
+
+    # If we have a Python path (PyMOL.app or conda env), use subprocess
+    if PYMOL_PYTHON_PATH:
+        return _align_via_external_python(
             mobile_file, reference_file, output_file,
-            mobile_chain, reference_chain
+            mobile_chain, reference_chain,
+            PYMOL_PYTHON_PATH
         )
 
-    # Fallback to direct PyMOL module
+    # Fallback to direct PyMOL module (if it was imported successfully)
     return _align_via_pymol_module(
         mobile_file, reference_file, output_file,
         mobile_chain, reference_chain
     )
 
 
-def _align_via_pymol_app(
+def _align_via_external_python(
     mobile_file: str,
     reference_file: str,
     output_file: str,
     mobile_chain: Optional[str] = None,
-    reference_chain: Optional[str] = None
+    reference_chain: Optional[str] = None,
+    python_path: str = None
 ) -> float:
     """
-    Align structures using PyMOL.app's Python interpreter.
+    Align structures using an external Python interpreter with PyMOL.
+
+    Works with PyMOL.app, conda environments, or any Python with pymol installed.
     """
     import subprocess
     import json
+
+    if python_path is None:
+        python_path = PYMOL_PYTHON_PATH or PYMOL_APP_PYTHON
 
     # Build selection strings
     ref_sel = "reference"
@@ -420,9 +537,9 @@ sys.stderr.write(json.dumps({{"rmsd": rmsd}}) + "\\n")
 sys.stderr.flush()
 '''
 
-    # Run via PyMOL.app's Python
+    # Run via external Python
     result = subprocess.run(
-        [PYMOL_APP_PYTHON, '-c', script],
+        [python_path, '-c', script],
         capture_output=True,
         text=True,
         timeout=120
