@@ -213,20 +213,26 @@ def find_mouse_antigen_in_sabdab(
         return None
 
     # Try to match by antigen name (case-insensitive)
-    if 'antigen_name' in mouse_entries.columns:
-        # Exact match first
-        name_mask = mouse_entries['antigen_name'].str.lower().str.strip() == antigen_name_lower
+    # Only return a match if we find a name match - don't return arbitrary mouse structures
+    if 'antigen_name' not in mouse_entries.columns or not antigen_name_lower:
+        return None
+
+    # Exact match first
+    name_mask = mouse_entries['antigen_name'].str.lower().str.strip() == antigen_name_lower
+    matched = mouse_entries[name_mask]
+
+    # If no exact match, try partial match (antigen name contains search term)
+    if matched.empty:
+        name_mask = mouse_entries['antigen_name'].str.lower().str.contains(
+            antigen_name_lower, na=False, regex=False
+        )
         matched = mouse_entries[name_mask]
 
-        # If no exact match, try partial match
-        if matched.empty:
-            name_mask = mouse_entries['antigen_name'].str.lower().str.contains(
-                antigen_name_lower, na=False
-            )
-            matched = mouse_entries[name_mask]
+    # If still no match, return None - don't return arbitrary mouse structures
+    if matched.empty:
+        return None
 
-        if not matched.empty:
-            mouse_entries = matched
+    mouse_entries = matched
 
     # Filter by resolution
     if 'resolution' in mouse_entries.columns:

@@ -300,7 +300,12 @@ class CrossSpeciesDatasetPipeline:
             )
             if sabdab_mouse:
                 mouse_pdb_id = sabdab_mouse['pdb']
-                mouse_chain = sabdab_mouse['antigen_chain']
+                # Parse multi-chain format like "A | B" - take first chain
+                raw_chain = sabdab_mouse['antigen_chain']
+                if ' | ' in str(raw_chain):
+                    mouse_chain = raw_chain.split(' | ')[0].strip()
+                else:
+                    mouse_chain = str(raw_chain).strip()
                 mouse_gene_name = sabdab_mouse.get('antigen_name', '')
                 mouse_structure_source = "SAbDab"
                 seq_identity = 100.0  # Assume high identity for same-name antigen
@@ -534,7 +539,10 @@ class CrossSpeciesDatasetPipeline:
 
         # === Phase 4: Human-Mouse alignment ===
         # Create pair directory: HumanMouse/{gene}_{chain}_{mouse_gene}/
-        pair_name = f"{gene_name}_{antigen_chain}_{mouse_gene_name or 'Mouse'}"
+        # Sanitize directory name - remove special characters
+        safe_mouse_gene = "".join(c if c.isalnum() or c in '-_' else '_' for c in (mouse_gene_name or 'Mouse'))
+        safe_mouse_gene = safe_mouse_gene[:50]  # Limit length
+        pair_name = f"{gene_name}_{antigen_chain}_{safe_mouse_gene}"
         pair_dir = os.path.join(self.human_mouse_dir, pair_name)
         os.makedirs(pair_dir, exist_ok=True)
 
@@ -651,7 +659,10 @@ class CrossSpeciesDatasetPipeline:
                     continue
 
                 # Copy to MouseAntigen directory
-                output_path = os.path.join(self.mouse_antigen_dir, f"{gene_name}.cif")
+                # Sanitize filename - remove special characters
+                safe_gene_name = "".join(c if c.isalnum() or c in '-_' else '_' for c in gene_name)
+                safe_gene_name = safe_gene_name[:100]  # Limit length
+                output_path = os.path.join(self.mouse_antigen_dir, f"{safe_gene_name}.cif")
                 import shutil
                 shutil.copy2(aligned_mouse_cif, output_path)
 
