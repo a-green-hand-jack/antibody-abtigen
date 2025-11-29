@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Install dependencies
+      run: |
+        uv sync
+
+    - name: Run dry-run test with 10 samples
+      run: |
+        uv run python run.py --limit 10 --dry-run --no-pymol
+
+    - name: Verify output files
+      run: |
+        # Check that summary CSV was created
+        if [ -f "output/dataset_summary.csv" ]; then
+          echo "Summary CSV created successfully"
+          cat output/dataset_summary.csv
+        else
+          echo "Error: Summary CSV not found"
+          exit 1
+        fi
+
+        # Check processing log
+        if [ -f "output/processing_log.json" ]; then
+          echo "Processing log created successfully"
+        else
+          echo "Error: Processing log not found"
+          exit 1
+        fi
+
+  test-with-structures:
+    runs-on: ubuntu-latest
+    # Only run on main branch or manual trigger (to avoid excessive API calls)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Install dependencies
+      run: |
+        uv sync
+
+    - name: Run full test with 5 samples (download structures)
+      run: |
+        uv run python run.py --limit 5 --no-pymol
+      timeout-minutes: 10
+
+    - name: Check results
+      run: |
+        echo "=== Dataset Summary ==="
+        cat output/dataset_summary.csv
+
+        echo ""
+        echo "=== Output Structure ==="
+        ls -la output/
+
+        # Count successful entries
+        SUCCESSFUL=$(grep -c ",success," output/dataset_summary.csv || echo "0")
+        echo ""
+        echo "Successful entries: $SUCCESSFUL"
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-output
+        path: |
+          output/dataset_summary.csv
+          output/processing_log.json
+        retention-days: 7
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Install dependencies
+      run: |
+        uv sync
+        uv add --dev ruff
+
+    - name: Run linter
+      run: |
+        uv run ruff check src/ run.py --ignore E501
+      continue-on-error: true  # Don't fail on lint errors for now
