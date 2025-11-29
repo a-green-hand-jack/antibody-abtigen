@@ -29,6 +29,12 @@ from .pymol_env import (
     get_pymol_python,
     verify_pymol,
 )
+from .yaml_converter import (
+    cif_to_boltz_yaml,
+    batch_convert_to_yamls,
+    extract_sequences_from_cif,
+    extract_disulfide_bonds,
+)
 
 __all__ = [
     "CrossSpeciesDatasetPipeline",
@@ -49,4 +55,9 @@ __all__ = [
     "find_pymol_env",
     "get_pymol_python",
     "verify_pymol",
+    # YAML conversion
+    "cif_to_boltz_yaml",
+    "batch_convert_to_yamls",
+    "extract_sequences_from_cif",
+    "extract_disulfide_bonds",
 ]

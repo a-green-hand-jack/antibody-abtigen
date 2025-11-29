@@ -14,9 +14,11 @@ set -e
 
 LIMIT=${1:-10}
 OUTPUT_DIR="./data/multi_antigen/raw"
+YAML_DIR="./data/multi_antigen/yamls"
 DATA_DIR="./data/cache"
 
 mkdir -p "$OUTPUT_DIR"
+mkdir -p "$YAML_DIR"
 mkdir -p "$DATA_DIR"
 
 echo "=============================================="
@@ -44,13 +46,23 @@ if info['python_path']:
 "
 
 echo ""
-echo "Running pipeline with --limit $LIMIT..."
+echo "Step 1: Building structures with --limit $LIMIT..."
 echo ""
 
-antibody-abtigen \
+antibody-abtigen build \
     --output "$OUTPUT_DIR" \
     --data-dir "$DATA_DIR" \
     --limit "$LIMIT"
 
 echo ""
-echo "Test complete! Check $OUTPUT_DIR for results."
+echo "Step 2: Converting to YAML..."
+echo ""
+
+antibody-abtigen to-yaml \
+    --input "$OUTPUT_DIR" \
+    --output "$YAML_DIR"
+
+echo ""
+echo "Test complete!"
+echo "  Structures: $OUTPUT_DIR"
+echo "  YAMLs: $YAML_DIR"

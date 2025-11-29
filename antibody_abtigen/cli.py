@@ -9,7 +9,14 @@ import click
 from .pipeline import CrossSpeciesDatasetPipeline
 
 
-@click.command()
+@click.group()
+@click.version_option()
+def cli():
+    """Cross-Species Antibody-Antigen Structure Dataset Builder."""
+    pass
+
+
+@cli.command('build')
 @click.option(
     '--output', '-o',
     default='./output',
@@ -58,8 +65,7 @@ from .pipeline import CrossSpeciesDatasetPipeline
     default=False,
     help='Force re-download of SAbDab summary file'
 )
-@click.version_option()
-def main(
+def build_command(
     output: str,
     data_dir: str,
     limit: int,
@@ -72,21 +78,9 @@ def main(
     """
     Build cross-species antibody-antigen structure dataset.
 
-    This tool downloads antibody-antigen complex data from SAbDab,
+    Downloads antibody-antigen complex data from SAbDab,
     finds mouse orthologs for human antigens, and generates aligned
     structure triplets for machine learning and computational biology.
-
-    Output structure:
-
-    \b
-        output/
-        ├── dataset_summary.csv
-        ├── processing_log.json
-        └── DP_XXXX_Y/
-            ├── *_antibody.pdb/cif
-            ├── *_human_ag.pdb/cif
-            ├── *_mouse_ag.pdb/cif (aligned)
-            └── metadata.json
     """
     click.echo("=" * 60)
     click.echo("Cross-Species Antibody-Antigen Structure Dataset Builder")
@@ -158,6 +152,89 @@ def main(
     except Exception as e:
         click.echo(f"\nError: {e}", err=True)
         raise
+
+
+@cli.command('to-yaml')
+@click.option(
+    '--input', '-i', 'input_dir',
+    required=True,
+    help='Input directory containing DP_* folders with CIF files',
+    type=click.Path(exists=True)
+)
+@click.option(
+    '--output', '-o',
+    required=True,
+    help='Output directory for YAML files',
+    type=click.Path()
+)
+@click.option(
+    '--no-bonds',
+    is_flag=True,
+    default=False,
+    help='Do not include disulfide bonds in YAML'
+)
+def to_yaml_command(input_dir: str, output: str, no_bonds: bool):
+    """
+    Convert CIF files to Boltz-1 YAML format.
+
+    Takes the raw data directory containing DP_* folders and converts
+    each CIF file to a corresponding YAML configuration file.
+
+    \b
+    Input structure:
+        input_dir/
+        └── DP_XXXX_Y/
+            ├── DP_XXXX_Y_antibody.cif
+            ├── DP_XXXX_Y_human_ag.cif
+            └── DP_XXXX_Y_mouse_ag.cif
+
+    \b
+    Output structure:
+        output/
+        ├── DP_XXXX_Y_antibody.yaml
+        ├── DP_XXXX_Y_human_ag.yaml
+        ├── DP_XXXX_Y_mouse_ag.yaml
+        └── conversion_summary.json
+    """
+    from .yaml_converter import batch_convert_to_yamls
+
+    click.echo("=" * 60)
+    click.echo("CIF to Boltz YAML Converter")
+    click.echo("=" * 60)
+    click.echo()
+
+    click.echo("Configuration:")
+    click.echo(f"  Input directory: {input_dir}")
+    click.echo(f"  Output directory: {output}")
+    click.echo(f"  Include bonds: {not no_bonds}")
+    click.echo()
+
+    try:
+        results = batch_convert_to_yamls(
+            raw_data_dir=input_dir,
+            output_dir=output,
+            include_bonds=not no_bonds,
+            verbose=True
+        )
+
+        click.echo()
+        click.echo("=" * 60)
+        click.echo("Conversion Complete!")
+        click.echo("=" * 60)
+
+    except ImportError as e:
+        click.echo(f"\nError: {e}", err=True)
+        click.echo("Install missing dependencies: pip install gemmi pyyaml", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"\nError: {e}", err=True)
+        raise
+
+
+# Main entry point - use cli group
+def main():
+    """Main entry point for the CLI."""
+    cli()
 
 
 if __name__ == '__main__':

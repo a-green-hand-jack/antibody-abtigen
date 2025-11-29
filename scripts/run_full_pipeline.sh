@@ -25,12 +25,14 @@ set -e  # Exit on error
 
 # Configuration
 OUTPUT_DIR="./data/multi_antigen/raw"
+YAML_DIR="./data/multi_antigen/yamls"
 DATA_DIR="./data/cache"
 RESOLUTION_THRESHOLD=2.5
 IDENTITY_THRESHOLD=50.0
 
 # Create directories
 mkdir -p "$OUTPUT_DIR"
+mkdir -p "$YAML_DIR"
 mkdir -p "$DATA_DIR"
 mkdir -p logs
 
@@ -44,6 +46,7 @@ echo "Start time: $(date)"
 echo ""
 echo "Configuration:"
 echo "  Output directory: $OUTPUT_DIR"
+echo "  YAML directory: $YAML_DIR"
 echo "  Data cache: $DATA_DIR"
 echo "  Resolution threshold: $RESOLUTION_THRESHOLD Å"
 echo "  Identity threshold: $IDENTITY_THRESHOLD%"
@@ -97,19 +100,30 @@ if not info['available']:
     print(f'Setup result: {msg}')
 "
 
-# Run the pipeline
+# Step 1: Build the dataset (download structures)
 echo ""
 echo "=============================================="
-echo "Starting pipeline..."
+echo "Step 1: Building structure dataset..."
 echo "=============================================="
 echo ""
 
-antibody-abtigen \
+antibody-abtigen build \
     --output "$OUTPUT_DIR" \
     --data-dir "$DATA_DIR" \
     --resolution "$RESOLUTION_THRESHOLD" \
     --identity "$IDENTITY_THRESHOLD" \
     $USE_PYMOL
+
+# Step 2: Convert to YAML files
+echo ""
+echo "=============================================="
+echo "Step 2: Converting CIF to Boltz YAML..."
+echo "=============================================="
+echo ""
+
+antibody-abtigen to-yaml \
+    --input "$OUTPUT_DIR" \
+    --output "$YAML_DIR"
 
 # Print summary
 echo ""
@@ -121,6 +135,7 @@ echo ""
 echo "Output files:"
 echo "  Summary CSV: $OUTPUT_DIR/dataset_summary.csv"
 echo "  Processing log: $OUTPUT_DIR/processing_log.json"
+echo "  YAML files: $YAML_DIR/"
 echo ""
 
 # Count results
@@ -136,4 +151,5 @@ if [ -f "$OUTPUT_DIR/dataset_summary.csv" ]; then
     echo "  Failed: $FAILED"
     echo ""
     echo "Data point folders: $(ls -d "$OUTPUT_DIR"/DP_* 2>/dev/null | wc -l)"
+    echo "YAML files: $(ls "$YAML_DIR"/*.yaml 2>/dev/null | wc -l)"
 fi
