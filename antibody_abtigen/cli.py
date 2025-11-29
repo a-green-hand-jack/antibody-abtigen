@@ -259,6 +259,81 @@ def to_yaml_command(input_dir: str, output: str, no_bonds: bool):
         raise
 
 
+@cli.command('triplet')
+@click.option(
+    '--data-dir', '-d',
+    default='./data',
+    help='Data directory containing SAbDab/, MouseAntigen/, human_mouse_pairs.csv',
+    type=click.Path(exists=True)
+)
+@click.option(
+    '--output', '-o',
+    default=None,
+    help='Output directory (default: data_dir/HumanMouseAntigenAntibody)',
+    type=click.Path()
+)
+@click.option(
+    '--dry-run',
+    is_flag=True,
+    default=False,
+    help='Only print what would be done, do not create files'
+)
+def triplet_command(data_dir: str, output: str, dry_run: bool):
+    """
+    Generate aligned triplets (human_antigen, mouse_antigen, antibody).
+
+    Reads human_mouse_pairs.csv and creates aligned structure triplets
+    using PyMOL. Each triplet contains:
+    - human_antigen.cif (reference position)
+    - mouse_antigen.cif (aligned to human)
+    - antibody.cif (keeps relative position to human antigen)
+
+    \b
+    Output structure:
+        output/
+        └── {human_gene}_{mouse_gene}_{pdb_id}/
+            ├── human_antigen.cif
+            ├── mouse_antigen.cif
+            └── antibody.cif
+    """
+    from .triplet import generate_triplets
+
+    click.echo("=" * 60)
+    click.echo("Triplet Alignment Generator")
+    click.echo("=" * 60)
+    click.echo()
+
+    click.echo("Configuration:")
+    click.echo(f"  Data directory: {data_dir}")
+    click.echo(f"  Output directory: {output or 'data_dir/HumanMouseAntigenAntibody'}")
+    click.echo(f"  Dry run: {dry_run}")
+    click.echo()
+
+    try:
+        count = generate_triplets(
+            data_dir=data_dir,
+            output_dir=output,
+            dry_run=dry_run
+        )
+
+        click.echo()
+        click.echo("=" * 60)
+        click.echo("Triplet Generation Complete!")
+        click.echo("=" * 60)
+        click.echo(f"Generated {count} triplets")
+
+    except FileNotFoundError as e:
+        click.echo(f"\nError: {e}", err=True)
+        click.echo("Make sure you have run 'build' first to generate human_mouse_pairs.csv", err=True)
+        sys.exit(1)
+    except RuntimeError as e:
+        click.echo(f"\nError: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"\nError: {e}", err=True)
+        raise
+
+
 @cli.command('filter-interactions')
 @click.option(
     '--input', '-i', 'input_dir',
