@@ -19,7 +19,16 @@ Usage:
     uv run python run.py --output ./output --resolution 3.0 --identity 60
 """
 
+import sys
+
 from antibody_abtigen.cli import main
 
 if __name__ == '__main__':
+    # Convenience: allow `python run.py --limit 10` to default to `build`
+    known_commands = {'build', 'to-yaml', 'filter-interactions', '--help', '--version'}
+    if len(sys.argv) == 1:
+        sys.argv.insert(1, 'build')
+    elif sys.argv[1] not in known_commands:
+        sys.argv.insert(1, 'build')
+
     main()
