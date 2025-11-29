@@ -119,15 +119,16 @@ class CrossSpeciesDatasetPipeline:
         self.prefer_sabdab_mouse = prefer_sabdab_mouse
 
         # New directory structure (following document specification)
+        # All data goes under data_dir (./data/antigen_antibody/)
         # SAbDab directories (Phase 1-3)
         self.sabdab_raw_dir = os.path.join(data_dir, "SAbDab", "raw")
         self.sabdab_cleaned_dir = os.path.join(data_dir, "SAbDab", "cleaned")
         self.sabdab_antigen_dir = os.path.join(data_dir, "SAbDab", "antigen")
         self.sabdab_antibody_dir = os.path.join(data_dir, "SAbDab", "antibody")
 
-        # Output directories (Phase 4-5)
-        self.human_mouse_dir = os.path.join(output_dir, "HumanMouse")
-        self.mouse_antigen_dir = os.path.join(output_dir, "MouseAntigen")
+        # Phase 4-5 directories (also under data_dir per document spec)
+        self.human_mouse_dir = os.path.join(data_dir, "HumanMouse")
+        self.mouse_antigen_dir = os.path.join(data_dir, "MouseAntigen")
 
         # Create all directories
         for d in [
@@ -538,23 +539,26 @@ class CrossSpeciesDatasetPipeline:
             save_cif_with_metadata(human_cif, antigen_cif, chain_ids=ag_chains)
 
         # === Phase 4: Human-Mouse alignment ===
-        # Create pair directory: HumanMouse/{gene}_{chain}_{mouse_gene}/
+        # Create pair directory: HumanMouse/{human_gene}_{mouse_gene}/
         # Sanitize directory name - remove special characters
+        safe_human_gene = "".join(c if c.isalnum() or c in '-_' else '_' for c in (gene_name or 'Human'))
+        safe_human_gene = safe_human_gene[:50]
         safe_mouse_gene = "".join(c if c.isalnum() or c in '-_' else '_' for c in (mouse_gene_name or 'Mouse'))
-        safe_mouse_gene = safe_mouse_gene[:50]  # Limit length
-        pair_name = f"{gene_name}_{antigen_chain}_{safe_mouse_gene}"
+        safe_mouse_gene = safe_mouse_gene[:50]
+        pair_name = f"{safe_human_gene}_{safe_mouse_gene}"
         pair_dir = os.path.join(self.human_mouse_dir, pair_name)
         os.makedirs(pair_dir, exist_ok=True)
 
-        # Save human antigen chain to pair directory
-        human_ag_cif = os.path.join(pair_dir, "human_ag_chain.cif")
+        # Save human antigen (ALL chains) to pair directory
+        human_ag_cif = os.path.join(pair_dir, "human_ag.cif")
+        all_antigen_chains = antigen_chains if antigen_chains else [antigen_chain]
         if human_cif:
-            save_cif_with_metadata(human_cif, human_ag_cif, chain_ids=[antigen_chain])
+            save_cif_with_metadata(human_cif, human_ag_cif, chain_ids=all_antigen_chains)
         else:
-            save_structure_cif(human_structure, human_ag_cif, chain_ids=[antigen_chain])
+            save_structure_cif(human_structure, human_ag_cif, chain_ids=all_antigen_chains)
 
-        # Prepare for alignment
-        human_ag_pdb = os.path.join(pair_dir, "human_ag_chain.pdb")
+        # Prepare for alignment (use first chain for alignment reference)
+        human_ag_pdb = os.path.join(pair_dir, "human_ag_ref.pdb")
         save_structure(human_structure, human_ag_pdb, chain_ids=[antigen_chain])
 
         mouse_ag_pdb = os.path.join(pair_dir, "mouse_ag_unaligned.pdb")
@@ -581,8 +585,8 @@ class CrossSpeciesDatasetPipeline:
             )
 
         # Save aligned mouse structure
-        mouse_aligned_cif = os.path.join(pair_dir, "mouse_ag_chain_aligned.cif")
-        mouse_aligned_pdb = os.path.join(pair_dir, "mouse_ag_chain_aligned.pdb")
+        mouse_aligned_cif = os.path.join(pair_dir, "mouse_ag_aligned.cif")
+        mouse_aligned_pdb = os.path.join(pair_dir, "mouse_ag_aligned.pdb")
 
         if rotran and mouse_cif:
             save_cif_with_metadata(mouse_cif, mouse_aligned_cif, chain_ids=[mouse_chain], rotran=rotran)
@@ -591,27 +595,30 @@ class CrossSpeciesDatasetPipeline:
 
         save_structure(aligned_structure, mouse_aligned_pdb, chain_ids=[mouse_chain])
 
-        # Clean up temporary unaligned file
+        # Clean up temporary files
         if os.path.exists(mouse_ag_pdb):
             os.remove(mouse_ag_pdb)
+        if os.path.exists(human_ag_pdb):
+            os.remove(human_ag_pdb)
 
         # Save metadata for this pair
         pair_metadata = {
             'pair_name': pair_name,
             'pdb_id_human': pdb_id,
             'pdb_id_mouse': mouse_pdb_id,
-            'human_antigen_chain': antigen_chain,
+            'human_antigen_chains': all_antigen_chains,
             'mouse_antigen_chain': mouse_chain,
-            'antibody_chains': antibody_chains,
+            'antibody_heavy_chain': heavy_chain,
+            'antibody_light_chain': light_chain,
             'human_uniprot': human_uniprot,
             'mouse_uniprot': mouse_uniprot,
-            'gene_name': gene_name,
+            'human_gene_name': gene_name,
             'mouse_gene_name': mouse_gene_name,
             'alignment_rmsd': rmsd,
             'mouse_structure_source': mouse_structure_source,
             'files': {
-                'human_ag_chain': 'human_ag_chain.cif',
-                'mouse_ag_chain_aligned': 'mouse_ag_chain_aligned.cif'
+                'human_ag': 'human_ag.cif',
+                'mouse_ag_aligned': 'mouse_ag_aligned.cif'
             }
         }
 
@@ -644,26 +651,27 @@ class CrossSpeciesDatasetPipeline:
 
         library_files: Dict[str, str] = {}
 
+        import shutil
+
         for gene_name, datapoints in gene_to_datapoints.items():
             try:
                 # Find the best structure for this gene (lowest RMSD)
                 best_dp = min(datapoints, key=lambda dp: dp.alignment_rmsd or float('inf'))
 
                 # Get the aligned mouse structure from HumanMouse directory
-                pair_name = f"{best_dp.gene_name}_{best_dp.human_antigen_chain}_{gene_name or 'Mouse'}"
+                # Use same sanitization as in _process_structures
+                safe_human_gene = "".join(c if c.isalnum() or c in '-_' else '_' for c in (best_dp.gene_name or 'Human'))[:50]
+                safe_mouse_gene = "".join(c if c.isalnum() or c in '-_' else '_' for c in (gene_name or 'Mouse'))[:50]
+                pair_name = f"{safe_human_gene}_{safe_mouse_gene}"
                 pair_dir = os.path.join(self.human_mouse_dir, pair_name)
-                aligned_mouse_cif = os.path.join(pair_dir, "mouse_ag_chain_aligned.cif")
+                aligned_mouse_cif = os.path.join(pair_dir, "mouse_ag_aligned.cif")
 
                 if not os.path.exists(aligned_mouse_cif):
-                    self.log(f"Warning: Aligned mouse structure not found for {gene_name}", level="WARNING")
+                    self.log(f"Warning: Aligned mouse structure not found for {gene_name} at {aligned_mouse_cif}", level="WARNING")
                     continue
 
                 # Copy to MouseAntigen directory
-                # Sanitize filename - remove special characters
-                safe_gene_name = "".join(c if c.isalnum() or c in '-_' else '_' for c in gene_name)
-                safe_gene_name = safe_gene_name[:100]  # Limit length
-                output_path = os.path.join(self.mouse_antigen_dir, f"{safe_gene_name}.cif")
-                import shutil
+                output_path = os.path.join(self.mouse_antigen_dir, f"{safe_mouse_gene}.cif")
                 shutil.copy2(aligned_mouse_cif, output_path)
 
                 library_files[gene_name] = output_path
@@ -677,35 +685,64 @@ class CrossSpeciesDatasetPipeline:
 
     def _update_pairs_csv(self):
         """
-        Generate human_mouse_pairs.csv in HumanMouse/ directory.
+        Generate human_mouse_pairs.csv in data directory.
 
-        This CSV provides a quick lookup of all human-mouse antigen pairs.
+        This CSV provides a complete mapping of:
+        - Human antigen (PDB, chains, gene, UniProt)
+        - Mouse antigen (PDB, chain, gene, UniProt)
+        - Antibody (PDB, heavy chain, light chain)
         """
         pairs_data = []
         for dp in self.data_points:
             if dp.status == "success":
-                pair_name = f"{dp.gene_name}_{dp.human_antigen_chain}_{dp.mouse_gene_name or 'Mouse'}"
+                # Sanitize gene names for pair_name
+                safe_human_gene = "".join(c if c.isalnum() or c in '-_' else '_' for c in (dp.gene_name or 'Human'))[:50]
+                safe_mouse_gene = "".join(c if c.isalnum() or c in '-_' else '_' for c in (dp.mouse_gene_name or 'Mouse'))[:50]
+                pair_name = f"{safe_human_gene}_{safe_mouse_gene}"
+
+                # Format antigen chains as comma-separated string
+                antigen_chains_str = ','.join(dp.human_antigen_chains) if dp.human_antigen_chains else dp.human_antigen_chain
+
                 pairs_data.append({
+                    # Pair identification
                     'pair_name': pair_name,
-                    'human_pdb': dp.pdb_id_human,
-                    'mouse_pdb': dp.pdb_id_mouse,
-                    'human_chain': dp.human_antigen_chain,
-                    'mouse_chain': dp.mouse_antigen_chain,
-                    'human_uniprot': dp.human_uniprot,
-                    'mouse_uniprot': dp.mouse_uniprot,
-                    'human_gene': dp.gene_name,
-                    'mouse_gene': dp.mouse_gene_name,
+                    'pair_dir': f"HumanMouse/{pair_name}",
+
+                    # Human antigen info
+                    'human_antigen_pdb': dp.pdb_id_human,
+                    'human_antigen_chains': antigen_chains_str,
+                    'human_antigen_gene': dp.gene_name,
+                    'human_antigen_uniprot': dp.human_uniprot,
+                    'human_antigen_name': dp.protein_name,
+                    'human_antigen_file': f"SAbDab/antigen/{dp.pdb_id_human}_antigen.cif",
+
+                    # Mouse antigen info
+                    'mouse_antigen_pdb': dp.pdb_id_mouse,
+                    'mouse_antigen_chain': dp.mouse_antigen_chain,
+                    'mouse_antigen_gene': dp.mouse_gene_name,
+                    'mouse_antigen_uniprot': dp.mouse_uniprot,
+                    'mouse_antigen_source': dp.mouse_structure_source,
+                    'mouse_antigen_file': f"MouseAntigen/{safe_mouse_gene}.cif",
+
+                    # Antibody info
+                    'antibody_pdb': dp.pdb_id_human,
+                    'antibody_heavy_chain': dp.heavy_chain,
+                    'antibody_light_chain': dp.light_chain,
+                    'antibody_file': f"SAbDab/antibody/{dp.pdb_id_human}_antibody.cif",
+
+                    # Alignment metrics
                     'sequence_identity': dp.sequence_identity,
                     'alignment_rmsd': dp.alignment_rmsd,
-                    'mouse_source': dp.mouse_structure_source,
-                    'epitope_consistent': dp.epitope_consistent,
+
+                    # Epitope validation
+                    'epitope_identity': dp.epitope_identity,
                     'epitope_rmsd': dp.epitope_rmsd,
-                    'epitope_identity': dp.epitope_identity
+                    'epitope_consistent': dp.epitope_consistent
                 })
 
         if pairs_data:
             pairs_df = pd.DataFrame(pairs_data)
-            csv_path = os.path.join(self.human_mouse_dir, 'human_mouse_pairs.csv')
+            csv_path = os.path.join(self.data_dir, 'human_mouse_pairs.csv')
             pairs_df.to_csv(csv_path, index=False)
             self.log(f"Saved {len(pairs_data)} pairs to {csv_path}")
 
