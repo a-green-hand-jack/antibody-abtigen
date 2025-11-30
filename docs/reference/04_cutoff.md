@@ -17,7 +17,7 @@
     *   比较基于 SAbDab 日期和基于 CIF 内部日期的筛选结果是否一致（即 Boltz 筛选集是否是 SAbDab 筛选集的子集）。
 
 4.  **结果保存**：
-    *   将符合时间要求的 PDB ID 列表保存为 JSON 文件 (`before_cutoff_in_sabdab.json`)。
+    *   将发布日期在截止日期**之前（包含当天）**的 PDB ID 列表保存为 JSON 文件 (`before_cutoff_in_sabdab.json`)。这意味着该文件记录的是可用于训练模型的数据（即 cutoff date 之前的数据）。
 
 ## 主要函数
 
