@@ -51,9 +51,9 @@ from .core import (
     IndexMappingError,
 )
 
-# Implementation modules will be imported here as they're created:
-# from .cleaner import GemmiStructureCleaner
-# from .extractor import GeometricEpitopeExtractor
+# Implementation modules
+from .cleaner import GemmiStructureCleaner
+from .extractor import GeometricEpitopeExtractor
 # from .encoder import ESM2EpitopeEncoder
 # from .storage import HDF5EmbeddingStore
 # from .grouper import FAISSEpitopeGrouper
@@ -95,4 +95,8 @@ __all__ = [
     'AlignmentError',
     'ConfigurationError',
     'IndexMappingError',
+
+    # Implementations
+    'GemmiStructureCleaner',
+    'GeometricEpitopeExtractor',
 ]
