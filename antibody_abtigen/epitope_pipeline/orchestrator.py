@@ -46,6 +46,13 @@ from .aligner import (
     GroupAlignmentOutput,
     save_alignment_summary_csv,
 )
+from .validator import (
+    StructureValidator,
+    ValidationOutput,
+    save_validated_groups_json,
+    save_validation_report_csv,
+    generate_validation_report,
+)
 from .epitope_log import (
     save_epitope_residues_csv,
     save_epitope_summary_csv,
@@ -101,7 +108,8 @@ class EpitopePipeline(PipelineOrchestrator):
     1. Clean: Filter and clean CIF structures
     2. Embed: Generate ESM-2 embeddings for epitopes
     3. Group: Cluster epitopes by embedding similarity
-    4. Align: Align structures within groups
+    4. Validate: Validate groups by structural RMSD of pocket regions (NEW)
+    5. Align: Align structures within groups
 
     Usage:
         >>> config = create_default_config(data_dir="./data")
@@ -113,7 +121,10 @@ class EpitopePipeline(PipelineOrchestrator):
         self,
         config: Optional[PipelineConfig] = None,
         sabdab_summary_path: Optional[Path] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        rmsd_threshold: float = 3.0,
+        min_coverage: float = 0.5,
+        neighborhood_size: int = 10,
     ):
         """
         Initialize pipeline.
@@ -122,10 +133,16 @@ class EpitopePipeline(PipelineOrchestrator):
             config: Pipeline configuration (optional, uses defaults if None)
             sabdab_summary_path: Path to SAbDab summary TSV
             verbose: Print progress messages
+            rmsd_threshold: Maximum RMSD for structure validation (Angstroms)
+            min_coverage: Minimum alignment coverage for validation
+            neighborhood_size: Pocket expansion window size
         """
         self.config = config
         self.sabdab_summary_path = sabdab_summary_path
         self.verbose = verbose
+        self.rmsd_threshold = rmsd_threshold
+        self.min_coverage = min_coverage
+        self.neighborhood_size = neighborhood_size
 
         # Initialize components lazily
         self._cleaner = None
@@ -134,6 +151,7 @@ class EpitopePipeline(PipelineOrchestrator):
         self._store = None
         self._grouper = None
         self._aligner = None
+        self._validator = None
 
     def _log(self, message: str):
         """Log message if verbose."""
@@ -202,6 +220,17 @@ class EpitopePipeline(PipelineOrchestrator):
                 use_super = self.config.use_pymol_super
             self._aligner = PyMOLStructureAligner(use_super=use_super)
         return self._aligner
+
+    def _init_validator(self) -> StructureValidator:
+        """Initialize structure validator."""
+        if self._validator is None:
+            self._validator = StructureValidator(
+                rmsd_threshold=self.rmsd_threshold,
+                min_coverage=self.min_coverage,
+                min_group_size=2,
+                neighborhood_size=self.neighborhood_size,
+            )
+        return self._validator
 
     def run(
         self,
@@ -285,7 +314,8 @@ class EpitopePipeline(PipelineOrchestrator):
         self._log(f"{'='*70}")
         self._log(f"Input: {len(all_cif_files)} CIF files")
         self._log(f"Output: {output_dir}")
-        self._log(f"Stages: clean → embed → group → align")
+        self._log(f"Stages: clean → embed → group → validate → align")
+        self._log(f"Validation: RMSD<={self.rmsd_threshold}Å, coverage>={self.min_coverage:.0%}")
         self._log("")
 
         stages_completed = []
@@ -293,6 +323,7 @@ class EpitopePipeline(PipelineOrchestrator):
         epitopes: Dict[str, EpitopeResidues] = {}
         encoder_outputs: List[EncoderOutput] = []
         grouping_output: Optional[GroupingOutput] = None
+        validation_output: Optional[ValidationOutput] = None
         alignment_outputs: List[GroupAlignmentOutput] = []
 
         # Stage 1: Clean
@@ -395,9 +426,44 @@ class EpitopePipeline(PipelineOrchestrator):
                 errors=errors + ["No groups found"]
             )
 
-        # Stage 4: Align
+        # Stage 4: Validate (NEW)
+        if 'validate' not in skip_stages:
+            self._log("\nStage 4/5: Validating groups by structure...")
+            try:
+                validation_output = self._run_validate_stage(
+                    grouping_output, epitopes, structures, grouping_dir
+                )
+                stages_completed.append('validate')
+                self._log(f"  Input groups:    {validation_output.total_groups_input}")
+                self._log(f"  Validated groups: {validation_output.total_groups_output}")
+                self._log(f"  Eliminated:       {validation_output.groups_eliminated}")
+
+                # Convert validated groups back to GroupingOutput for alignment
+                if validation_output.validated_groups:
+                    grouping_output = self._convert_validation_to_grouping(validation_output)
+            except Exception as e:
+                errors.append(f"Validate stage failed: {e}")
+                logger.exception("Validate stage failed")
+        else:
+            self._log("\nStage 4/5: Skipping structure validation...")
+
+        if not grouping_output or not grouping_output.groups:
+            return PipelineResult(
+                success=len(stages_completed) > 0,
+                stages_completed=stages_completed,
+                total_structures=len(all_cif_files),
+                cleaned_structures=len(structures),
+                embedded_structures=len(encoder_outputs),
+                groups_found=0,
+                groups_aligned=0,
+                total_time_seconds=time.time() - start_time,
+                output_dir=output_dir,
+                errors=errors + ["No validated groups"]
+            )
+
+        # Stage 5: Align
         if 'align' not in skip_stages:
-            self._log("\nStage 4/4: Aligning structures...")
+            self._log("\nStage 5/5: Aligning structures...")
             try:
                 alignment_outputs = self._run_align_stage(
                     grouping_output.groups, epitopes, structures, aligned_dir
@@ -541,6 +607,71 @@ class EpitopePipeline(PipelineOrchestrator):
 
         return grouping_output
 
+    def _run_validate_stage(
+        self,
+        grouping_output: GroupingOutput,
+        epitopes: Dict[str, EpitopeResidues],
+        structures: Dict[str, CleanedStructure],
+        output_dir: Path
+    ) -> ValidationOutput:
+        """Run structure validation stage."""
+        validator = self._init_validator()
+
+        validation_output = validator.validate_groups(
+            grouping_output, epitopes, structures
+        )
+
+        # Save outputs
+        save_validated_groups_json(validation_output, output_dir / "validated_groups.json")
+        save_validation_report_csv(validation_output, output_dir / "validation_report.csv")
+
+        # Save human-readable report
+        report = generate_validation_report(validation_output)
+        report_path = output_dir / "validation_summary.txt"
+        with open(report_path, 'w') as f:
+            f.write(report)
+
+        return validation_output
+
+    def _convert_validation_to_grouping(
+        self,
+        validation_output: ValidationOutput
+    ) -> GroupingOutput:
+        """Convert ValidationOutput back to GroupingOutput for alignment."""
+        from .grouper import GroupMember
+
+        groups = []
+        for vg in validation_output.validated_groups:
+            members = []
+            for vm in vg.validated_members:
+                members.append(GroupMember(
+                    epitope_id=vm.epitope_id,
+                    pdb_id=vm.pdb_id,
+                    is_reference=vm.is_reference,
+                    antigen_chains=[],  # Will be filled during alignment
+                    epitope_residues={},
+                    total_residues=vm.atoms_in_pocket,
+                    similarity_to_ref=None
+                ))
+
+            groups.append(GroupResult(
+                group_id=vg.group_id,
+                reference_epitope_id=vg.reference_epitope_id,
+                member_count=vg.validated_member_count,
+                avg_similarity=vg.embedding_similarity,
+                min_similarity=0.0,
+                max_similarity=1.0,
+                members=members
+            ))
+
+        return GroupingOutput(
+            groups=groups,
+            total_epitopes=sum(g.member_count for g in groups),
+            grouped_epitopes=sum(g.member_count for g in groups),
+            singleton_count=0,
+            similarity_threshold=validation_output.rmsd_threshold
+        )
+
     def _run_align_stage(
         self,
         groups: List[GroupResult],
@@ -681,6 +812,10 @@ def run_pipeline(
     device: str = "cuda",
     similarity_threshold: float = 0.85,
     distance_threshold: float = 5.0,
+    rmsd_threshold: float = 3.0,
+    min_coverage: float = 0.5,
+    neighborhood_size: int = 10,
+    skip_validate: bool = False,
     verbose: bool = True
 ) -> PipelineResult:
     """
@@ -692,8 +827,12 @@ def run_pipeline(
         sabdab_summary: Path to SAbDab summary TSV
         limit: Maximum structures to process
         device: Device for ESM-2 ('cuda' or 'cpu')
-        similarity_threshold: Grouping threshold
+        similarity_threshold: Grouping threshold for embedding similarity
         distance_threshold: Epitope extraction distance
+        rmsd_threshold: Maximum RMSD for structure validation (Angstroms)
+        min_coverage: Minimum alignment coverage for validation
+        neighborhood_size: Pocket expansion window size
+        skip_validate: Skip structure validation stage
         verbose: Print progress
 
     Returns:
@@ -711,11 +850,17 @@ def run_pipeline(
     pipeline = EpitopePipeline(
         config=config,
         sabdab_summary_path=sabdab_summary,
-        verbose=verbose
+        verbose=verbose,
+        rmsd_threshold=rmsd_threshold,
+        min_coverage=min_coverage,
+        neighborhood_size=neighborhood_size,
     )
+
+    skip_stages = ['validate'] if skip_validate else []
 
     return pipeline.run_full(
         input_dir=input_dir,
         output_dir=output_dir,
-        limit=limit
+        limit=limit,
+        skip_stages=skip_stages
     )

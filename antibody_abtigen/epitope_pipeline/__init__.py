@@ -90,6 +90,19 @@ from .orchestrator import (
     PipelineCheckpoint,
     run_pipeline,
 )
+from .validator import (
+    PocketCropper,
+    PocketResidues,
+    PocketCoordinates,
+    StructureValidator,
+    StructuralValidationResult,
+    ValidatedGroupResult,
+    ValidationOutput,
+    save_validated_groups_json,
+    save_validation_report_csv,
+    generate_validation_report,
+    load_validated_groups_json,
+)
 
 __version__ = "0.1.0"
 
@@ -168,4 +181,17 @@ __all__ = [
     'PipelineResult',
     'PipelineCheckpoint',
     'run_pipeline',
+
+    # Structure Validation
+    'PocketCropper',
+    'PocketResidues',
+    'PocketCoordinates',
+    'StructureValidator',
+    'StructuralValidationResult',
+    'ValidatedGroupResult',
+    'ValidationOutput',
+    'save_validated_groups_json',
+    'save_validation_report_csv',
+    'generate_validation_report',
+    'load_validated_groups_json',
 ]

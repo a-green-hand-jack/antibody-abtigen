@@ -1272,6 +1272,33 @@ def align_command(
     default=False,
     help='Skip alignment stage'
 )
+@click.option(
+    '--skip-validate',
+    is_flag=True,
+    default=False,
+    help='Skip structure validation stage (use embedding-only groups)'
+)
+@click.option(
+    '--rmsd-threshold',
+    default=3.0,
+    show_default=True,
+    type=float,
+    help='Maximum pocket RMSD (Å) for structure validation'
+)
+@click.option(
+    '--min-coverage',
+    default=0.5,
+    show_default=True,
+    type=float,
+    help='Minimum alignment coverage for structure validation'
+)
+@click.option(
+    '--neighborhood-size',
+    default=10,
+    show_default=True,
+    type=int,
+    help='Pocket expansion window size (residues)'
+)
 def epitope_pipeline_command(
     input_dir: str,
     output_dir: str,
@@ -1283,32 +1310,56 @@ def epitope_pipeline_command(
     skip_clean: bool,
     skip_embed: bool,
     skip_group: bool,
-    skip_align: bool
+    skip_align: bool,
+    skip_validate: bool,
+    rmsd_threshold: float,
+    min_coverage: float,
+    neighborhood_size: int
 ):
     """
     Run the full epitope-centric pipeline.
 
-    This command runs all 4 stages of the pipeline:
+    This command runs all 5 stages of the pipeline:
     1. Clean: Filter and clean CIF structures
     2. Embed: Generate ESM-2 embeddings for epitopes
     3. Group: Cluster epitopes by embedding similarity
-    4. Align: Align structures within groups
+    4. Validate: Filter groups by structural RMSD of pocket regions
+    5. Align: Align structures within validated groups
+
+    \b
+    Structure Validation (Stage 4):
+        - Expands epitope residues to contiguous pocket regions
+        - Computes pairwise RMSD between pocket Cα atoms
+        - Filters out members exceeding RMSD threshold
+        - Requires minimum alignment coverage
 
     \b
     Output structure:
         output_dir/
         ├── cleaned/              # Cleaned CIF files
         ├── embeddings/           # ESM-2 embeddings (HDF5)
-        ├── grouping/             # Groups and similarity matrix
+        ├── grouping/             # Groups, validation results, similarity matrix
+        │   ├── groups.json       # Original embedding-based groups
+        │   ├── validated_groups.json  # Structure-validated groups
+        │   └── validation_report.csv  # Per-member validation stats
         ├── aligned/              # Aligned structures per group
         └── pipeline_summary.json # Overall summary
 
     \b
     Example:
+        # Full pipeline with structure validation
         antibody-abtigen epitope-pipeline \\
             --input ./data/raw_cif \\
             --output ./data/epitope_output \\
+            --rmsd-threshold 3.0 \\
+            --min-coverage 0.5 \\
             --limit 100
+
+        # Skip structure validation (use embedding-only groups)
+        antibody-abtigen epitope-pipeline \\
+            --input ./data/raw_cif \\
+            --output ./data/epitope_output \\
+            --skip-validate
     """
     from pathlib import Path
 
@@ -1325,6 +1376,8 @@ def epitope_pipeline_command(
         skip_stages.append('embed')
     if skip_group:
         skip_stages.append('group')
+    if skip_validate:
+        skip_stages.append('validate')
     if skip_align:
         skip_stages.append('align')
 
@@ -1347,11 +1400,14 @@ def epitope_pipeline_command(
         if default_sabdab.exists():
             sabdab_path = default_sabdab.resolve()
 
-    # Initialize and run pipeline
+    # Initialize and run pipeline with validation parameters
     pipeline = EpitopePipeline(
         config=config,
         sabdab_summary_path=sabdab_path,
-        verbose=True
+        verbose=True,
+        rmsd_threshold=rmsd_threshold,
+        min_coverage=min_coverage,
+        neighborhood_size=neighborhood_size
     )
 
     result = pipeline.run_full(

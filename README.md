@@ -153,16 +153,35 @@ antibody-abtigen build --resolution 3.0 --identity 60 --limit 100
 antibody-abtigen build --no-pymol
 ```
 
-### Epitope Pipeline (ESM-2 Embeddings)
+### Epitope Pipeline (ESM-2 Embeddings + Structure Validation)
+
+The epitope pipeline groups antibody-antigen complexes by epitope similarity using a 5-stage process:
+1. **Clean**: Filter and process raw CIF structures
+2. **Embed**: Generate ESM-2 embeddings for epitope residues
+3. **Group**: Cluster epitopes by embedding similarity
+4. **Validate**: Filter groups by structural RMSD of pocket regions (NEW)
+5. **Align**: Align structures within validated groups
 
 **Full Pipeline (Recommended)**:
 ```bash
-# Run all 4 stages in one command
+# Run all 5 stages with structure validation
 antibody-abtigen epitope-pipeline \
     --input ./data/raw_cif \
     --output ./data/epitope_output \
+    --rmsd-threshold 3.0 \
+    --min-coverage 0.5 \
     --limit 100
 ```
+
+**Structure Validation Options**:
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--skip-validate` | Skip structure validation (use embedding-only groups) | False |
+| `--rmsd-threshold` | Maximum pocket RMSD (Å) for structure validation | 3.0 |
+| `--min-coverage` | Minimum fraction of pocket atoms that must align | 0.5 |
+| `--neighborhood-size` | Pocket expansion window size (residues) | 10 |
+
+The validation stage expands discrete epitope contact residues to contiguous pocket regions (inspired by Boltz-2 Affinity Cropper), then computes pairwise RMSD between pocket Cα atoms to ensure structural similarity within groups.
 
 **Step-by-Step**:
 ```bash
@@ -199,6 +218,12 @@ Output from `group` command:
 - `similarity_sparse.h5`: Pairwise similarities above threshold
 - `similarity_matrix.h5`: Full similarity matrix (if `--save-matrix`)
 - `grouping_report.txt`: Human-readable summary
+
+**Note on validation**: When running the full pipeline, the validation stage will:
+- Expand epitope residues to contiguous pocket regions
+- Compute pairwise RMSD between pocket Cα atoms
+- Filter out members exceeding the RMSD threshold
+- Output `validated_groups.json` and `validation_report.csv` in the grouping directory
 
 ```bash
 # Step 4: Align structures within groups

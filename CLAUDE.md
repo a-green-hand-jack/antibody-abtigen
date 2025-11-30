@@ -43,8 +43,20 @@ uv run antibody-abtigen to-yaml --input ./output --output ./output_yamls
 # Filter for antibody-antigen contacts
 uv run antibody-abtigen filter-interactions --input ./output --output ./output_filtered
 
-# Epitope pipeline: full pipeline (recommended)
+# Epitope pipeline: full pipeline with structure validation (recommended)
 uv run antibody-abtigen epitope-pipeline --input ./data/raw_cif --output ./data/epitope_output --limit 10
+
+# Full pipeline with custom validation thresholds
+uv run antibody-abtigen epitope-pipeline \
+    --input ./data/raw_cif \
+    --output ./data/epitope_output \
+    --rmsd-threshold 3.0 \
+    --min-coverage 0.5 \
+    --neighborhood-size 10 \
+    --limit 100
+
+# Skip structure validation (use embedding-only groups)
+uv run antibody-abtigen epitope-pipeline --input ./data/raw_cif --output ./data/epitope_output --skip-validate
 
 # Or step-by-step:
 uv run antibody-abtigen clean --input ./data/raw_cif --output ./data/cleaned_cif
@@ -122,6 +134,10 @@ The `antibody_abtigen/` package contains:
   - `encoder.py`: ESM-2 3B epitope encoder with multi-chain support
   - `storage.py`: HDF5 embedding storage with gzip compression
   - `epitope_log.py`: CSV logging utilities for epitope residues
+  - `grouper.py`: Epitope grouping by ESM-2 embedding similarity
+  - `aligner.py`: PyMOL-based structure alignment within groups
+  - `validator.py`: Structure-based group validation with pocket expansion
+  - `orchestrator.py`: Pipeline orchestrator coordinating all stages
 
 - **`filtering.py`**: Post-processing interaction filter
   - Validates antibody-antigen contacts via distance calculations
