@@ -425,3 +425,30 @@ This catches errors early rather than failing deep in the pipeline.
     - Peptide antigens: 873 (8.6%) → REJECTED (unless mixed with protein)
     - Hapten antigens: 51 (0.5%) → REJECTED
   - **Result**: Only protein antigens are cleaned and saved for ESM-2 embedding
+
+- **2025-11-30 (Day 3)**: ESM-2 Epitope Encoder Implementation
+  - **New module**: `encoder.py` - ESM-2 3B epitope encoder
+    - `ESM2EpitopeEncoder` class with full-context embedding strategy
+    - Multi-chain support: encode each chain separately, weighted average by epitope residue count
+    - Dual output: `full_embedding` (complete chain) + `epitope_embedding` (epitope residues only)
+    - FP16 mixed precision for A100 GPU efficiency
+    - `EncoderOutput` and `ChainEmbeddingResult` dataclasses
+  - **New module**: `storage.py` - HDF5 embedding storage
+    - `HDF5EmbeddingStore` class with gzip compression
+    - Hierarchical structure: `/embeddings/{epitope_id}/chains/{chain_id}/`
+    - Stores both aggregated and per-chain embeddings
+    - Incremental writes and fast retrieval by ID
+  - **New module**: `epitope_log.py` - CSV logging utilities
+    - `save_epitope_residues_csv()`: per-residue info (pdb_id, chain_id, auth_seq_id, zero_based_index, residue_type)
+    - `save_epitope_summary_csv()`: per-structure summary
+    - `save_embedding_stats_csv()`: embedding statistics
+    - `generate_epitope_report()`: human-readable report
+  - **New CLI commands**:
+    - `antibody-abtigen clean`: Clean and filter CIF structures
+    - `antibody-abtigen embed`: Generate ESM-2 embeddings
+  - **Bug fix**: Fixed PDB ID extraction in cleaner to handle `_cleaned` suffix
+  - **Test results** (10 structures):
+    - All 10 structures encoded successfully
+    - Epitope residues: 19-71 (mean: 29.0)
+    - Multi-chain epitopes: 2/10 (20%)
+    - Embedding dimension: 2560 (L2 normalized)

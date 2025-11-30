@@ -135,23 +135,46 @@ print(f"Sequence identity: {mouse_info['sequence_identity']:.1f}%")
 
 ```bash
 # Run with default settings (all data)
-antibody-abtigen
+antibody-abtigen build
 
 # Demo mode with limited entries
-antibody-abtigen --limit 10
+antibody-abtigen build --limit 10
 
 # Dry-run mode (analysis only, no structure downloads)
-antibody-abtigen --limit 50 --dry-run
+antibody-abtigen build --limit 50 --dry-run
 
 # Filter to retain only antibody–antigen contacts (after build)
 antibody-abtigen filter-interactions --input ./output --output ./output_filtered
 
 # Custom thresholds
-antibody-abtigen --resolution 3.0 --identity 60 --limit 100
+antibody-abtigen build --resolution 3.0 --identity 60 --limit 100
 
 # Use Biopython instead of PyMOL for alignment
-antibody-abtigen --no-pymol
+antibody-abtigen build --no-pymol
 ```
+
+### Epitope Pipeline (ESM-2 Embeddings)
+
+```bash
+# Step 1: Clean and filter raw CIF files
+antibody-abtigen clean \
+    --input ./data/raw_cif \
+    --output ./data/cleaned_cif \
+    --sabdab-summary ./data/meta/sabdab_summary_all.tsv
+
+# Step 2: Generate ESM-2 embeddings for epitopes
+antibody-abtigen embed \
+    --input ./data/cleaned_cif \
+    --output ./data/embeddings \
+    --device cuda \
+    --limit 100  # Optional: process first N structures
+```
+
+Output from `embed` command:
+- `embeddings.h5`: HDF5 file with full-chain and epitope embeddings (2560-dim, L2 normalized)
+- `epitope_residues.csv`: Per-residue epitope info (chain_id, auth_seq_id, residue_type)
+- `epitope_summary.csv`: Per-structure summary
+- `embedding_stats.csv`: Embedding statistics
 
 ### Command Line Options
 

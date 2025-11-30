@@ -42,6 +42,10 @@ uv run antibody-abtigen to-yaml --input ./output --output ./output_yamls
 
 # Filter for antibody-antigen contacts
 uv run antibody-abtigen filter-interactions --input ./output --output ./output_filtered
+
+# Epitope pipeline: clean structures and generate ESM-2 embeddings
+uv run antibody-abtigen clean --input ./data/raw_cif --output ./data/cleaned_cif
+uv run antibody-abtigen embed --input ./data/cleaned_cif --output ./data/embeddings --limit 10
 ```
 
 ### Testing
@@ -106,6 +110,13 @@ The `antibody_abtigen/` package contains:
 - **`yaml_converter.py`**: CIF to Boltz YAML conversion
   - Extracts sequences and disulfide bonds from mmCIF files
   - Generates YAML configs for Boltz-1 structure prediction
+
+- **`epitope_pipeline/`**: Epitope-centric dataset pipeline (ESM-2 embeddings)
+  - `cleaner.py`: Structure cleaning with SAbDab metadata-based chain classification
+  - `extractor.py`: Distance-based epitope extraction (default: 5.0Å)
+  - `encoder.py`: ESM-2 3B epitope encoder with multi-chain support
+  - `storage.py`: HDF5 embedding storage with gzip compression
+  - `epitope_log.py`: CSV logging utilities for epitope residues
 
 - **`filtering.py`**: Post-processing interaction filter
   - Validates antibody-antigen contacts via distance calculations

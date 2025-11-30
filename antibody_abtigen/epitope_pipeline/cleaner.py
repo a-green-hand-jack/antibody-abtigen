@@ -251,7 +251,12 @@ class GemmiStructureCleaner(StructureCleaner):
             raise StructureCleaningError(f"CIF file not found: {cif_path}")
 
         try:
+            # Extract PDB ID from filename, removing common suffixes like '_cleaned'
             pdb_id = cif_path.stem.upper()
+            for suffix in ['_CLEANED', '_CLEAN', '-CLEANED', '-CLEAN']:
+                if pdb_id.endswith(suffix):
+                    pdb_id = pdb_id[:-len(suffix)]
+                    break
 
             # Step 1: Parse CIF with Biopython to get sequences
             chain_info = self._extract_chain_info(cif_path)

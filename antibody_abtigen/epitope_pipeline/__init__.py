@@ -60,8 +60,14 @@ from .cleaner import (
     generate_filter_summary,
 )
 from .extractor import GeometricEpitopeExtractor
-# from .encoder import ESM2EpitopeEncoder
-# from .storage import HDF5EmbeddingStore
+from .encoder import ESM2EpitopeEncoder, EncoderOutput, ChainEmbeddingResult
+from .storage import HDF5EmbeddingStore
+from .epitope_log import (
+    save_epitope_residues_csv,
+    save_epitope_summary_csv,
+    save_embedding_stats_csv,
+    generate_epitope_report,
+)
 # from .grouper import FAISSEpitopeGrouper
 # from .aligner import PyMOLStructureAligner
 # from .orchestrator import EpitopePipeline
@@ -105,10 +111,20 @@ __all__ = [
     # Implementations
     'GemmiStructureCleaner',
     'GeometricEpitopeExtractor',
+    'ESM2EpitopeEncoder',
+    'EncoderOutput',
+    'ChainEmbeddingResult',
+    'HDF5EmbeddingStore',
 
     # Filtering
     'FilterReason',
     'FilterResult',
     'save_filter_log',
     'generate_filter_summary',
+
+    # Epitope logging
+    'save_epitope_residues_csv',
+    'save_epitope_summary_csv',
+    'save_embedding_stats_csv',
+    'generate_epitope_report',
 ]
