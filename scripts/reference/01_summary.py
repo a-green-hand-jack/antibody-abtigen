@@ -61,20 +61,20 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 STANDARD_RESIDUE_SUBSTITUTIONS_INCASEOF_NON_STANDARD_RESIDUE = {
     '2AS':'ASP', '3AH':'HIS', '5HP':'GLU', 'ACL':'ARG', 'AGM':'ARG', 'AIB':'ALA', 'ALM':'ALA', 'ALO':'THR', 'ALY':'LYS', 'ARM':'ARG',
     'ASA':'ASP', 'ASB':'ASP', 'ASK':'ASP', 'ASL':'ASP', 'ASQ':'ASP', 'AYA':'ALA', 'BCS':'CYS', 'BHD':'ASP', 'BMT':'THR', 'BNN':'ALA',
-    'BUC':'CYS', 'BUG':'LEU', 'C5C':'CYS', 'C6C':'CYS', 'CAS':'CYS', 'CCS':'CYS', 'CEA':'CYS', 'CGU':'GLU', 'CHG':'ALA', 'CLE':'LEU', 
-    'CME':'CYS', 'CSD':'ALA', 'CSO':'CYS', 'CSP':'CYS', 'CSS':'CYS', 'CSW':'CYS', 'CSX':'CYS', 'CXM':'MET', 'CY1':'CYS', 'CY3':'CYS', 
-    'CYG':'CYS', 'CYM':'CYS', 'CYQ':'CYS', 'DAH':'PHE', 'DAL':'ALA', 'DAR':'ARG', 'DAS':'ASP', 'DCY':'CYS', 'DGL':'GLU', 'DGN':'GLN', 
-    'DHA':'ALA', 'DHI':'HIS', 'DIL':'ILE', 'DIV':'VAL', 'DLE':'LEU', 'DLY':'LYS', 'DNP':'ALA', 'DPN':'PHE', 'DPR':'PRO', 'DSN':'SER', 
-    'DSP':'ASP', 'DTH':'THR', 'DTR':'TRP', 'DTY':'TYR', 'DVA':'VAL', 'EFC':'CYS', 'FLA':'ALA', 'FME':'MET', 'GGL':'GLU', 'GL3':'GLY', 
-    'GLZ':'GLY', 'GMA':'GLU', 'GSC':'GLY', 'HAC':'ALA', 'HAR':'ARG', 'HIC':'HIS', 'HIP':'HIS', 'HMR':'ARG', 'HPQ':'PHE', 'HTR':'TRP', 
-    'HYP':'PRO', 'IAS':'ASP', 'IIL':'ILE', 'IYR':'TYR', 'KCX':'LYS', 'LLP':'LYS', 'LLY':'LYS', 'LTR':'TRP', 'LYM':'LYS', 'LYZ':'LYS', 
-    'MAA':'ALA', 'MEN':'ASN', 'MHS':'HIS', 'MIS':'SER', 'MLE':'LEU', 'MPQ':'GLY', 'MSA':'GLY', 'MSE':'MET', 'MVA':'VAL', 'NEM':'HIS', 
-    'NEP':'HIS', 'NLE':'LEU', 'NLN':'LEU', 'NLP':'LEU', 'NMC':'GLY', 'OAS':'SER', 'OCS':'CYS', 'OMT':'MET', 'PAQ':'TYR', 'PCA':'GLU', 
-    'PEC':'CYS', 'PHI':'PHE', 'PHL':'PHE', 'PR3':'CYS', 'PRR':'ALA', 'PTR':'TYR', 'PYX':'CYS', 'SAC':'SER', 'SAR':'GLY', 'SCH':'CYS', 
-    'SCS':'CYS', 'SCY':'CYS', 'SEL':'SER', 'SEP':'SER', 'SET':'SER', 'SHC':'CYS', 'SHR':'LYS', 'SMC':'CYS', 'SOC':'CYS', 'STY':'TYR', 
-    'SVA':'SER', 'TIH':'ALA', 'TPL':'TRP', 'TPO':'THR', 'TPQ':'ALA', 'TRG':'LYS', 'TRO':'TRP', 'TYB':'TYR', 'TYI':'TYR', 'TYQ':'TYR', 
-    'TYS':'TYR', 'TYY':'TYR', 'ALA':'ALA', 'ARG':'ARG', 'ASN':'ASN', 'ASP':'ASP', 'CYS':'CYS', 'GLU':'GLU', 'GLN':'GLN', 'GLY':'GLY', 
-    'HIS':'HIS', 'ILE':'ILE', 'LEU':'LEU', 'LYS':'LYS', 'MET':'MET', 'PHE':'PHE', 'PRO':'PRO', 'SER':'SER', 'THR':'THR', 'TRP':'TRP', 
+    'BUC':'CYS', 'BUG':'LEU', 'C5C':'CYS', 'C6C':'CYS', 'CAS':'CYS', 'CCS':'CYS', 'CEA':'CYS', 'CGU':'GLU', 'CHG':'ALA', 'CLE':'LEU',
+    'CME':'CYS', 'CSD':'ALA', 'CSO':'CYS', 'CSP':'CYS', 'CSS':'CYS', 'CSW':'CYS', 'CSX':'CYS', 'CXM':'MET', 'CY1':'CYS', 'CY3':'CYS',
+    'CYG':'CYS', 'CYM':'CYS', 'CYQ':'CYS', 'DAH':'PHE', 'DAL':'ALA', 'DAR':'ARG', 'DAS':'ASP', 'DCY':'CYS', 'DGL':'GLU', 'DGN':'GLN',
+    'DHA':'ALA', 'DHI':'HIS', 'DIL':'ILE', 'DIV':'VAL', 'DLE':'LEU', 'DLY':'LYS', 'DNP':'ALA', 'DPN':'PHE', 'DPR':'PRO', 'DSN':'SER',
+    'DSP':'ASP', 'DTH':'THR', 'DTR':'TRP', 'DTY':'TYR', 'DVA':'VAL', 'EFC':'CYS', 'FLA':'ALA', 'FME':'MET', 'GGL':'GLU', 'GL3':'GLY',
+    'GLZ':'GLY', 'GMA':'GLU', 'GSC':'GLY', 'HAC':'ALA', 'HAR':'ARG', 'HIC':'HIS', 'HIP':'HIS', 'HMR':'ARG', 'HPQ':'PHE', 'HTR':'TRP',
+    'HYP':'PRO', 'IAS':'ASP', 'IIL':'ILE', 'IYR':'TYR', 'KCX':'LYS', 'LLP':'LYS', 'LLY':'LYS', 'LTR':'TRP', 'LYM':'LYS', 'LYZ':'LYS',
+    'MAA':'ALA', 'MEN':'ASN', 'MHS':'HIS', 'MIS':'SER', 'MLE':'LEU', 'MPQ':'GLY', 'MSA':'GLY', 'MSE':'MET', 'MVA':'VAL', 'NEM':'HIS',
+    'NEP':'HIS', 'NLE':'LEU', 'NLN':'LEU', 'NLP':'LEU', 'NMC':'GLY', 'OAS':'SER', 'OCS':'CYS', 'OMT':'MET', 'PAQ':'TYR', 'PCA':'GLU',
+    'PEC':'CYS', 'PHI':'PHE', 'PHL':'PHE', 'PR3':'CYS', 'PRR':'ALA', 'PTR':'TYR', 'PYX':'CYS', 'SAC':'SER', 'SAR':'GLY', 'SCH':'CYS',
+    'SCS':'CYS', 'SCY':'CYS', 'SEL':'SER', 'SEP':'SER', 'SET':'SER', 'SHC':'CYS', 'SHR':'LYS', 'SMC':'CYS', 'SOC':'CYS', 'STY':'TYR',
+    'SVA':'SER', 'TIH':'ALA', 'TPL':'TRP', 'TPO':'THR', 'TPQ':'ALA', 'TRG':'LYS', 'TRO':'TRP', 'TYB':'TYR', 'TYI':'TYR', 'TYQ':'TYR',
+    'TYS':'TYR', 'TYY':'TYR', 'ALA':'ALA', 'ARG':'ARG', 'ASN':'ASN', 'ASP':'ASP', 'CYS':'CYS', 'GLU':'GLU', 'GLN':'GLN', 'GLY':'GLY',
+    'HIS':'HIS', 'ILE':'ILE', 'LEU':'LEU', 'LYS':'LYS', 'MET':'MET', 'PHE':'PHE', 'PRO':'PRO', 'SER':'SER', 'THR':'THR', 'TRP':'TRP',
     'TYR':'TYR', 'VAL':'VAL', 'UNK':'UNK'
 }
 
@@ -155,7 +155,7 @@ def nan_to_empty_string(val):
 
 # Split delimited string
 def split_sabdab_delimited_str(val):
-    if val != val or not val:       
+    if val != val or not val:
         return []
     else:
         return sorted([s.strip() for s in val.split('|')])
@@ -180,7 +180,7 @@ def parse_biopython_structure(pdb_id, entity, max_seq_len = None):
     chains = Selection.unfold_entities(entity, 'C')  # C for chain
     chains.sort(key=lambda c: c.get_id())  # Sort chains by chain ID
     data = {}
-    
+
     for _, chain in enumerate(chains):
         residues = Selection.unfold_entities(chain, 'R')  # R for residue
         residues.sort(key=lambda res: (res.get_id()[1], res.get_id()[2]))
@@ -190,8 +190,8 @@ def parse_biopython_structure(pdb_id, entity, max_seq_len = None):
         for index, res in enumerate(residues):
 
             """
-            length truncation: 
-            In chothia, 
+            length truncation:
+            In chothia,
             the VL region is the first 109 residues (including those with insertion codes)
             the VH region is the first 113 residues (including those with insertion codes)
             Reference: http://www.bioinf.org.uk/abs/info.html
@@ -201,7 +201,7 @@ def parse_biopython_structure(pdb_id, entity, max_seq_len = None):
                 break
 
             resname = res.get_resname()
-            if not is_aa(resname): 
+            if not is_aa(resname):
                 if resname != 'HOH':
                     logging.warning(f'PDB id: {pdb_id} Chain: {chain.get_id()} Index: {index + 1} Residue: {resname} Not an amino acid')
                 continue
@@ -303,7 +303,7 @@ def json_to_csv(json_content):
     scfv = []
     date = []
     index_in_summary = []
-    
+
     for key, value in json_content.items():
         file_name.append(key)
         pdb.append(value["pdb"])
@@ -338,7 +338,7 @@ def json_to_csv(json_content):
         "date": date,
         "index_in_summary": index_in_summary
     })
-    
+
     return df
 
 
@@ -356,13 +356,13 @@ def process_entry(row, index, chothia_dir, log_path, consider_no_antigen):
         a tuple of (entry_name, value_to_save, A int)
         entry_name: the name of the entry
         value_to_save: the value to save, if failed to process, return None
-        A int: 
-            0 if the entry is processed, 
+        A int:
+            0 if the entry is processed,
             1 if the entry is failed to read the pdb file (the pdb file is too large)
             2 if the entry is ignored
     """
-    
-    
+
+
     # Configure logging in each subprocess
     logging.basicConfig(
         filename=log_path,
@@ -370,7 +370,7 @@ def process_entry(row, index, chothia_dir, log_path, consider_no_antigen):
         format='%(asctime)s - %(levelname)s - %(message)s',
         filemode='a' # Append mode, won't cause the log file to be overwritten by each subprocess
     )
-    
+
     entry_id = row['pdb'].lower()
     antigen_chains = split_sabdab_delimited_str(
         nan_to_empty_string(row['antigen_chain'])
@@ -403,11 +403,11 @@ def process_entry(row, index, chothia_dir, log_path, consider_no_antigen):
         'date': entry_date,
         'index_in_summary': index
     }
-    
+
     if entry_id in WRONG_PDB_ID:
         return entry_name, None, 2
 
-    
+
     if consider_no_antigen:
         if not (
                 (entry_ag_type in ALLOWED_ANTIGEN_TYPES or entry_ag_type is None)
@@ -430,7 +430,7 @@ def process_entry(row, index, chothia_dir, log_path, consider_no_antigen):
         logging.error(error_message)
         return entry_name, None, 1  # None: ignore this sample
 
-    
+
     # H chain
     if nan_to_none(row['Hchain']) is not None:
         try:
@@ -492,13 +492,13 @@ def process_raw_data(args):
     # using joblib to parallelize the processing
     results = Parallel(n_jobs=-1)(
         delayed(process_entry)(row, index, chothia_dir, log_path, consider_no_antigen_flag) for index, row in tqdm(
-            summary_df.iterrows(), 
-            total=len(summary_df), 
-            desc='Processing raw data', 
+            summary_df.iterrows(),
+            total=len(summary_df),
+            desc='Processing raw data',
             dynamic_ncols=True
         )
     )
-    
+
     failed_to_process_with_bio = []
 
     for entry_name, value_to_save, indicator in results:
@@ -507,12 +507,12 @@ def process_raw_data(args):
         else:
             if indicator == 1:
                 failed_to_process_with_bio.append(entry_name)
-                
+
     processed_data = correct_sabdab(processed_data) # SabDab may wrongly classify the heavy chain as light chain, and vice versa
-    
+
     df = json_to_csv(processed_data)
     df.to_csv(os.path.join(output_dir, os.path.splitext(args.output_file_name)[0] + '.csv'), index=False)
-    
+
     with open(os.path.join(output_dir, 'failed_to_process_with_bio.json'), 'w') as f:
         json.dump(failed_to_process_with_bio, f, indent=4)
 
@@ -523,7 +523,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--chothia_dir', type=str, default='./data/raw_data/chothia/')
-    parser.add_argument('--summary_dir', type=str, default='./data/raw_data/sabdab_summary_all.tsv')
+    parser.add_argument('--summary_dir', type=str, default='./data/raw_data/meta/sabdab_summary_all.tsv')
     parser.add_argument('--output_dir', type=str, default='./data/')
     parser.add_argument('--output_file_name', type=str, default='summary.json')
     parser.add_argument('--consider_no_antigen', action='store_true')
