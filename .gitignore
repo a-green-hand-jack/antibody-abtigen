@@ -55,3 +55,21 @@ htmlcov/
 
 # ruff
 .ruff_cache/
+
+# tests
+./tests/cleaner/output_cleaned/*.cif
+./tests/cleaner/output_edge_cases/*.cif
+./tests/cleaner/output_filtered/*.cif
+tests/cleaner/output_filtered/1A2Y_cleaned.cif
+tests/cleaner/output_filtered/1A14_cleaned.cif
+tests/cleaner/output_filtered/1ADQ_cleaned.cif
+tests/cleaner/output_filtered/1AFV_cleaned.cif
+tests/cleaner/output_filtered/1AHW_cleaned.cif
+tests/cleaner/output_filtered/1AR1_cleaned.cif
+tests/cleaner/output_filtered/1BGX_cleaned.cif
+tests/cleaner/output_filtered/1BJ1_cleaned.cif
+tests/cleaner/output_filtered/9JY2_cleaned.cif
+tests/cleaner/output_filtered/9KY2_cleaned.cif
+tests/cleaner/output_edge_cases/9IA4_cleaned.cif
+tests/cleaner/output_edge_cases/9JY2_cleaned.cif
+tests/cleaner/output_edge_cases/9KY2_cleaned.cif
