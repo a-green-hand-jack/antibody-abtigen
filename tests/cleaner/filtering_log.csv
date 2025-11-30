@@ -1,0 +1,51 @@
+pdb_id,accepted,filter_reason,antigen_chains,antigen_type,num_antigen_chains,total_antigen_residues,num_antibody_chains,details
+12E8,No,no_antigen,NA,NA,0,0,4,No antigen chains found or antigen_chain=NA
+15C8,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1A0Q,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1A14,Yes,accepted,N,protein,1,388,2,Protein antigen with 388 residues
+1A2Y,Yes,accepted,C,protein,1,129,2,Protein antigen with 129 residues
+1A3L,No,no_antigen,L,Hapten,0,0,2,No antigen chains found or antigen_chain=NA
+1A3R,No,peptide_only,P,peptide,1,15,2,Peptide-only antigen (too short for reliable ESM-2 embedding)
+1A4J,No,no_antigen,,,0,0,4,No antigen chains found or antigen_chain=NA
+1A4K,No,no_antigen,B,Hapten,0,0,4,No antigen chains found or antigen_chain=NA
+1A5F,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1A6T,No,no_antigen,,,0,0,4,No antigen chains found or antigen_chain=NA
+1A6U,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1A6V,No,no_protein_antigen,J,Hapten,4,456,2,No protein antigen component (type: Hapten)
+1A6W,No,no_antigen,H,Hapten,0,0,2,No antigen chains found or antigen_chain=NA
+1A7N,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1A7O,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1A7P,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1A7Q,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1A7R,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1A8J,No,no_antigen,L,Hapten,0,0,2,No antigen chains found or antigen_chain=NA
+1ACY,No,peptide_only,P,peptide,1,10,2,Peptide-only antigen (too short for reliable ESM-2 embedding)
+1AD0,No,no_antigen,,,0,0,4,No antigen chains found or antigen_chain=NA
+1AD9,No,no_antigen,,,0,0,4,No antigen chains found or antigen_chain=NA
+1ADQ,Yes,accepted,A,protein,1,206,2,Protein antigen with 206 residues
+1AE6,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1AFV,Yes,accepted,B,protein,2,302,4,Protein antigen with 302 residues
+1AHW,Yes,accepted,C,protein,1,200,5,Protein antigen with 200 residues
+1AI1,No,peptide_only,P,peptide,1,9,2,Peptide-only antigen (too short for reliable ESM-2 embedding)
+1AIF,No,no_antigen,,,0,0,4,No antigen chains found or antigen_chain=NA
+1AJ7,No,no_antigen,H,Hapten,0,0,2,No antigen chains found or antigen_chain=NA
+1AP2,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1AQK,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1AR1,Yes,accepted,B,protein,2,781,2,Protein antigen with 781 residues
+1AR2,No,no_antigen,,,0,0,1,No antigen chains found or antigen_chain=NA
+1AXS,No,no_antigen,H,Hapten,0,0,4,No antigen chains found or antigen_chain=NA
+1AXT,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1AY1,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1B0W,No,no_antigen,,,0,0,1,No antigen chains found or antigen_chain=NA
+1B2W,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1B4J,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1B6D,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1BAF,No,no_antigen,L,Hapten,0,0,2,No antigen chains found or antigen_chain=NA
+1BBD,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1BBJ,No,no_antigen,,,0,0,4,No antigen chains found or antigen_chain=NA
+1BEY,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA
+1BFO,No,no_antigen,,,0,0,8,No antigen chains found or antigen_chain=NA
+1BFV,No,no_antigen,H,Hapten,0,0,2,No antigen chains found or antigen_chain=NA
+1BGX,Yes,accepted,T,protein,1,828,2,Protein antigen with 828 residues
+1BJ1,Yes,accepted,V,protein,2,188,4,Protein antigen with 188 residues
+1BJM,No,no_antigen,,,0,0,2,No antigen chains found or antigen_chain=NA

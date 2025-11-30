@@ -4,6 +4,34 @@ This directory contains test scripts and outputs for the structure cleaner modul
 
 ## Test Scripts
 
+### `test_filtering.py`
+Tests antigen type filtering functionality on edge cases (protein, protein+peptide, peptide-only, no antigen).
+
+**Usage**:
+```bash
+uv run python tests/cleaner/test_filtering.py
+```
+
+**Features**:
+- Validates filtering rules on specific test cases
+- Tests batch filtering on first 50 structures
+- Generates CSV filter log and summary statistics
+
+### `batch_clean_with_filter.py`
+Production script for batch cleaning with filtering on all CIF files.
+
+**Usage**:
+```bash
+uv run python tests/cleaner/batch_clean_with_filter.py
+```
+
+**Features**:
+- Processes all CIF files in `data/raw_cif/`
+- Filters out non-protein antigens
+- Saves only accepted structures to `data/epitope_pipeline/cleaned/`
+- Generates comprehensive filtering statistics
+- Extracts epitopes from accepted structures
+
 ### `test_cleaner_demo.py`
 Main demo script that tests the complete clean → extract pipeline on 10 structures.
 
@@ -61,6 +89,41 @@ Contains cleaned CIF files with:
 
 ### `output_pdb/`
 Contains PDB format versions of cleaned structures for tools that prefer PDB over mmCIF.
+
+## Filtering Logic
+
+### Antigen Type Filtering
+
+The cleaner now filters structures based on antigen type to ensure only suitable structures are processed for ESM-2 embedding:
+
+**Accepted**:
+- Protein antigens (pure protein)
+- Protein + peptide combinations (protein component used for embedding)
+
+**Rejected**:
+1. No antigen (antigen_chain=NA) - No epitope to extract
+2. Peptide-only antigens - Too short for reliable ESM-2 embeddings
+3. Hapten-only antigens - Small molecules, not proteins
+4. Insufficient residues - Less than 10 total antigen residues
+
+**Filter Results**:
+All filtering decisions are logged to CSV with:
+- `pdb_id`: Structure identifier
+- `accepted`: Yes/No
+- `filter_reason`: Reason for acceptance/rejection
+- `antigen_chains`: Chain IDs from SAbDab
+- `antigen_type`: Type from SAbDab (protein/peptide/hapten)
+- `num_antigen_chains`: Number of antigen chains found
+- `total_antigen_residues`: Total residues in all antigen chains
+- `num_antibody_chains`: Number of antibody chains
+- `details`: Human-readable explanation
+
+### Output Files
+
+When running batch cleaning:
+- **Cleaned CIF files**: `data/epitope_pipeline/cleaned/*.cif` (only accepted structures)
+- **Filter log**: `data/epitope_pipeline/filtering_log.csv` (all structures with decisions)
+- **Epitope stats**: `data/epitope_pipeline/epitope_stats.csv` (epitope info for accepted structures)
 
 ## Key Design Decisions
 

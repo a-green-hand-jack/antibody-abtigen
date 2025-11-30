@@ -202,13 +202,19 @@ tests/
 
 ### Module I: Structure Cleaner (`cleaner.py`) - ✅ DONE
 
-**Implemented**: `GemmiStructureCleaner` class (370 lines)
+**Implemented**: `GemmiStructureCleaner` class (637 lines with filtering)
 
 **Features**:
 - Parses mmCIF files using Biopython for sequence extraction
 - **Uses SAbDab metadata** (`sabdab_summary_all.tsv`) for accurate chain classification:
-  - Reads `Hchain`, `Lchain`, `antigen_chain` columns
+  - Reads `Hchain`, `Lchain`, `antigen_chain`, `antigen_type` columns
   - Falls back to length heuristics only when metadata unavailable
+- **Antigen type filtering** (NEW):
+  - Filters structures before processing
+  - Only accepts protein antigens (or protein+peptide)
+  - Rejects: no antigen, peptide-only, hapten-only, insufficient residues
+  - Returns `(CleanedStructure, FilterResult)` tuple
+  - Logs all filtering decisions to CSV
 - **Preserves original PDB chain IDs** (no renaming):
   - Avoids PyMOL visualization issues
   - Maintains structure integrity
@@ -224,19 +230,26 @@ cleaner = GemmiStructureCleaner(
     output_dir=Path("./cleaned"),
     sabdab_summary_path=Path("data/meta/sabdab_summary_all.tsv")
 )
-cleaned = cleaner.clean_structure(Path("1a14.cif"))
+cleaned, filter_result = cleaner.clean_structure(Path("1a14.cif"))
 
-# Result:
-# - cleaned.pdb_id = "1A14"
-# - cleaned.chain_mappings = [
-#     ChainMapping(original="N", standardized="N", type="antigen"),  # NO renaming!
-#     ChainMapping(original="H", standardized="H", type="antibody_heavy"),
-#     ChainMapping(original="L", standardized="L", type="antibody_light"),
-#   ]
-# - cleaned.file_path = "./cleaned/1A14_cleaned.cif"
+if filter_result.accepted:
+    # Result:
+    # - cleaned.pdb_id = "1A14"
+    # - cleaned.chain_mappings = [
+    #     ChainMapping(original="N", standardized="N", type="antigen"),  # NO renaming!
+    #     ChainMapping(original="H", standardized="H", type="antibody_heavy"),
+    #     ChainMapping(original="L", standardized="L", type="antibody_light"),
+    #   ]
+    # - cleaned.file_path = "./cleaned/1A14_cleaned.cif"
+    # - filter_result.reason = FilterReason.ACCEPTED
+else:
+    # cleaned is None
+    # filter_result.reason tells you why (e.g., FilterReason.NO_ANTIGEN)
 ```
 
-**Key design decision**: `standardized_chain_id` = `original_chain_id` (no renaming). The ChainMapping dataclass tracks the chain type classification, but the CIF file retains original chain IDs.
+**Key design decisions**:
+1. `standardized_chain_id` = `original_chain_id` (no renaming). The ChainMapping dataclass tracks the chain type classification, but the CIF file retains original chain IDs.
+2. Filtering before processing saves computation - only protein antigens are processed and saved.
 
 ### Module II: Epitope Extractor (`extractor.py`) - ✅ DONE
 
@@ -393,3 +406,22 @@ This catches errors early rather than failing deep in the pipeline.
   - Removed duplicate `antibody_abtigen/cleaner.py` file
   - All test outputs moved to `tests/cleaner/` directory
   - Verified: Cleaned structures display correctly in PyMOL with proper atom coordinates
+
+- **2025-11-30 (Day 2 Enhancement)**: Added antigen type filtering
+  - **New feature**: Filter structures by antigen type before processing
+  - Added `FilterReason` enum and `FilterResult` dataclass
+  - Implemented `should_process_structure()` method with filtering rules:
+    1. ACCEPT: Protein antigen (pure protein or protein+peptide)
+    2. REJECT: No antigen (antigen_chain=NA)
+    3. REJECT: Peptide-only antigen (too short for ESM-2)
+    4. REJECT: Hapten-only antigen (small molecules)
+    5. REJECT: Insufficient residues (<10 total)
+  - Modified `clean_structure()` to return `(CleanedStructure, FilterResult)` tuple
+  - Added CSV logging functions: `save_filter_log()` and `generate_filter_summary()`
+  - Created test scripts: `test_filtering.py` and `batch_clean_with_filter.py`
+  - **Statistics** (from 10,200 SAbDab structures):
+    - Protein antigens: 6,973 (68.4%) → ACCEPTED
+    - No antigen: 1,903 (18.7%) → REJECTED
+    - Peptide antigens: 873 (8.6%) → REJECTED (unless mixed with protein)
+    - Hapten antigens: 51 (0.5%) → REJECTED
+  - **Result**: Only protein antigens are cleaned and saved for ESM-2 embedding

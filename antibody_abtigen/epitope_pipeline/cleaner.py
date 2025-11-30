@@ -17,8 +17,10 @@ Reuses logic from:
 
 import os
 from pathlib import Path
-from typing import Iterator, List, Dict, Optional
+from typing import Iterator, List, Dict, Optional, Tuple
 from collections import defaultdict
+from dataclasses import dataclass
+from enum import Enum
 
 import gemmi
 from Bio.PDB import MMCIFParser
@@ -31,6 +33,30 @@ from .core import (
     StructureCleaningError,
     IndexMappingError,
 )
+
+
+class FilterReason(Enum):
+    """Reasons for filtering out structures."""
+    ACCEPTED = "accepted"
+    NO_ANTIGEN = "no_antigen"
+    PEPTIDE_ONLY = "peptide_only"
+    HAPTEN_ONLY = "hapten_only"
+    NO_PROTEIN_ANTIGEN = "no_protein_antigen"
+    INSUFFICIENT_ANTIGEN_RESIDUES = "insufficient_antigen_residues"
+
+
+@dataclass(frozen=True)
+class FilterResult:
+    """Result of structure filtering decision."""
+    pdb_id: str
+    accepted: bool
+    reason: FilterReason
+    antigen_chains: str  # e.g., "A | B"
+    antigen_type: str    # e.g., "protein | peptide"
+    num_antigen_chains: int
+    total_antigen_residues: int
+    num_antibody_chains: int
+    details: str  # Additional human-readable details
 
 
 class GemmiStructureCleaner(StructureCleaner):
@@ -76,15 +102,147 @@ class GemmiStructureCleaner(StructureCleaner):
         self.sabdab_summary_path = sabdab_summary_path
         self._sabdab_cache = None
 
-    def clean_structure(self, cif_path: Path) -> CleanedStructure:
+    def should_process_structure(
+        self,
+        pdb_id: str,
+        chain_info: Dict[str, Dict],
+        chain_types: Dict[str, str]
+    ) -> FilterResult:
         """
-        Clean a single CIF structure.
+        Determine if structure should be processed based on antigen type.
+
+        Filtering rules:
+        1. ACCEPT: Has protein antigen (pure protein or protein+peptide)
+        2. REJECT: No antigen (antigen_chain=NA)
+        3. REJECT: Peptide-only antigen (no protein component)
+        4. REJECT: Hapten-only antigen
+        5. REJECT: Insufficient antigen residues (<10 residues total)
+
+        Args:
+            pdb_id: PDB identifier
+            chain_info: Chain sequence information
+            chain_types: Chain type classifications
+
+        Returns:
+            FilterResult with decision and details
+        """
+        # Load SAbDab metadata
+        self._load_sabdab_cache()
+        sabdab_info = self._sabdab_cache.get(pdb_id.upper(), {})
+
+        antigen_chain_str = sabdab_info.get('antigen_chain', '')
+        antigen_type_str = sabdab_info.get('antigen_type', '')
+
+        # Count chains
+        antigen_chains = [cid for cid, ctype in chain_types.items() if ctype == 'antigen']
+        antibody_chains = [cid for cid, ctype in chain_types.items() if ctype in ['antibody_heavy', 'antibody_light']]
+
+        total_antigen_residues = sum(
+            chain_info[cid]['length'] for cid in antigen_chains if cid in chain_info
+        )
+
+        # Rule 1: No antigen chains
+        if not antigen_chains or antigen_chain_str == 'NA' or not antigen_chain_str:
+            return FilterResult(
+                pdb_id=pdb_id,
+                accepted=False,
+                reason=FilterReason.NO_ANTIGEN,
+                antigen_chains=antigen_chain_str,
+                antigen_type=antigen_type_str,
+                num_antigen_chains=0,
+                total_antigen_residues=0,
+                num_antibody_chains=len(antibody_chains),
+                details="No antigen chains found or antigen_chain=NA"
+            )
+
+        # Rule 2: Check antigen type
+        if antigen_type_str:
+            antigen_types = [t.strip() for t in antigen_type_str.split('|')]
+
+            # Reject hapten-only
+            if all(t == 'hapten' for t in antigen_types if t):
+                return FilterResult(
+                    pdb_id=pdb_id,
+                    accepted=False,
+                    reason=FilterReason.HAPTEN_ONLY,
+                    antigen_chains=antigen_chain_str,
+                    antigen_type=antigen_type_str,
+                    num_antigen_chains=len(antigen_chains),
+                    total_antigen_residues=total_antigen_residues,
+                    num_antibody_chains=len(antibody_chains),
+                    details="Hapten-only antigen (not suitable for ESM-2)"
+                )
+
+            # Reject peptide-only (unless it's mixed with protein)
+            has_protein = any(t == 'protein' for t in antigen_types)
+            if not has_protein and any(t == 'peptide' for t in antigen_types):
+                return FilterResult(
+                    pdb_id=pdb_id,
+                    accepted=False,
+                    reason=FilterReason.PEPTIDE_ONLY,
+                    antigen_chains=antigen_chain_str,
+                    antigen_type=antigen_type_str,
+                    num_antigen_chains=len(antigen_chains),
+                    total_antigen_residues=total_antigen_residues,
+                    num_antibody_chains=len(antibody_chains),
+                    details="Peptide-only antigen (too short for reliable ESM-2 embedding)"
+                )
+
+            # Ensure at least one protein component
+            if not has_protein:
+                return FilterResult(
+                    pdb_id=pdb_id,
+                    accepted=False,
+                    reason=FilterReason.NO_PROTEIN_ANTIGEN,
+                    antigen_chains=antigen_chain_str,
+                    antigen_type=antigen_type_str,
+                    num_antigen_chains=len(antigen_chains),
+                    total_antigen_residues=total_antigen_residues,
+                    num_antibody_chains=len(antibody_chains),
+                    details=f"No protein antigen component (type: {antigen_type_str})"
+                )
+
+        # Rule 3: Minimum residue count (at least 10 residues total)
+        if total_antigen_residues < 10:
+            return FilterResult(
+                pdb_id=pdb_id,
+                accepted=False,
+                reason=FilterReason.INSUFFICIENT_ANTIGEN_RESIDUES,
+                antigen_chains=antigen_chain_str,
+                antigen_type=antigen_type_str,
+                num_antigen_chains=len(antigen_chains),
+                total_antigen_residues=total_antigen_residues,
+                num_antibody_chains=len(antibody_chains),
+                details=f"Only {total_antigen_residues} antigen residues (minimum: 10)"
+            )
+
+        # ACCEPT
+        return FilterResult(
+            pdb_id=pdb_id,
+            accepted=True,
+            reason=FilterReason.ACCEPTED,
+            antigen_chains=antigen_chain_str,
+            antigen_type=antigen_type_str,
+            num_antigen_chains=len(antigen_chains),
+            total_antigen_residues=total_antigen_residues,
+            num_antibody_chains=len(antibody_chains),
+            details=f"Protein antigen with {total_antigen_residues} residues"
+        )
+
+    def clean_structure(
+        self, cif_path: Path, skip_filtering: bool = False
+    ) -> Tuple[Optional[CleanedStructure], FilterResult]:
+        """
+        Clean a single CIF structure with filtering.
 
         Args:
             cif_path: Path to input mmCIF file
+            skip_filtering: If True, skip antigen type filtering (for testing)
 
         Returns:
-            CleanedStructure with standardized chain IDs and mappings
+            Tuple of (CleanedStructure or None, FilterResult)
+            - CleanedStructure is None if structure was filtered out
+            - FilterResult contains filtering decision and details
 
         Raises:
             StructureCleaningError: If cleaning fails
@@ -101,22 +259,31 @@ class GemmiStructureCleaner(StructureCleaner):
             # Step 2: Classify chains as antigen/antibody (using SAbDab metadata if available)
             chain_types = self._classify_chains(chain_info, pdb_id)
 
-            # Step 3: Create standardized chain mappings
+            # Step 3: Check if structure should be processed
+            filter_result = self.should_process_structure(pdb_id, chain_info, chain_types)
+
+            if not skip_filtering and not filter_result.accepted:
+                # Structure filtered out - return None and filter result
+                return None, filter_result
+
+            # Step 4: Create standardized chain mappings
             chain_mappings = self._create_chain_mappings(
                 pdb_id, chain_info, chain_types
             )
 
-            # Step 4: Clean CIF with Gemmi and save
+            # Step 5: Clean CIF with Gemmi and save
             output_path = self._clean_and_save_cif(
                 cif_path, pdb_id, chain_mappings
             )
 
-            return CleanedStructure(
+            cleaned = CleanedStructure(
                 pdb_id=pdb_id,
                 file_path=output_path,
                 chain_mappings=chain_mappings,
                 antigen_cluster_id=None  # Assigned later in pipeline
             )
+
+            return cleaned, filter_result
 
         except Exception as e:
             raise StructureCleaningError(
@@ -205,6 +372,7 @@ class GemmiStructureCleaner(StructureCleaner):
                     'Hchain': row.get('Hchain', ''),
                     'Lchain': row.get('Lchain', ''),
                     'antigen_chain': row.get('antigen_chain', ''),
+                    'antigen_type': row.get('antigen_type', ''),
                 }
 
     def _classify_chains(
@@ -383,3 +551,86 @@ class GemmiStructureCleaner(StructureCleaner):
         )
 
         return output_path
+
+
+def save_filter_log(filter_results: List[FilterResult], output_path: Path):
+    """
+    Save filtering results to CSV file.
+
+    Args:
+        filter_results: List of FilterResult objects
+        output_path: Path to output CSV file
+    """
+    import csv
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+
+        # Header
+        writer.writerow([
+            'pdb_id',
+            'accepted',
+            'filter_reason',
+            'antigen_chains',
+            'antigen_type',
+            'num_antigen_chains',
+            'total_antigen_residues',
+            'num_antibody_chains',
+            'details'
+        ])
+
+        # Data rows
+        for result in filter_results:
+            writer.writerow([
+                result.pdb_id,
+                'Yes' if result.accepted else 'No',
+                result.reason.value,
+                result.antigen_chains,
+                result.antigen_type,
+                result.num_antigen_chains,
+                result.total_antigen_residues,
+                result.num_antibody_chains,
+                result.details
+            ])
+
+
+def generate_filter_summary(filter_results: List[FilterResult]) -> str:
+    """
+    Generate human-readable summary of filtering results.
+
+    Args:
+        filter_results: List of FilterResult objects
+
+    Returns:
+        Formatted summary string
+    """
+    total = len(filter_results)
+    accepted = sum(1 for r in filter_results if r.accepted)
+    rejected = total - accepted
+
+    # Count by reason
+    from collections import Counter
+    reason_counts = Counter(r.reason for r in filter_results)
+
+    summary = []
+    summary.append("=" * 70)
+    summary.append("Structure Filtering Summary")
+    summary.append("=" * 70)
+    summary.append(f"Total structures processed: {total}")
+    summary.append(f"Accepted: {accepted} ({accepted/total*100:.1f}%)")
+    summary.append(f"Rejected: {rejected} ({rejected/total*100:.1f}%)")
+    summary.append("")
+    summary.append("Rejection reasons:")
+
+    for reason, count in reason_counts.most_common():
+        if reason != FilterReason.ACCEPTED:
+            percentage = count / total * 100
+            summary.append(f"  - {reason.value}: {count} ({percentage:.1f}%)")
+
+    summary.append("")
+    summary.append(f"Accepted structures have protein antigens suitable for ESM-2 embedding")
+    summary.append("=" * 70)
+
+    return "\n".join(summary)

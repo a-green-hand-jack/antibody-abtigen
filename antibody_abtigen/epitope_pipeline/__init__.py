@@ -52,7 +52,13 @@ from .core import (
 )
 
 # Implementation modules
-from .cleaner import GemmiStructureCleaner
+from .cleaner import (
+    GemmiStructureCleaner,
+    FilterReason,
+    FilterResult,
+    save_filter_log,
+    generate_filter_summary,
+)
 from .extractor import GeometricEpitopeExtractor
 # from .encoder import ESM2EpitopeEncoder
 # from .storage import HDF5EmbeddingStore
@@ -99,4 +105,10 @@ __all__ = [
     # Implementations
     'GemmiStructureCleaner',
     'GeometricEpitopeExtractor',
+
+    # Filtering
+    'FilterReason',
+    'FilterResult',
+    'save_filter_log',
+    'generate_filter_summary',
 ]
