@@ -111,14 +111,16 @@ def extract_epitope_residues(
             # Clone the chain to add to temp model
             original_chain = model[chain_id]
             ab_model.add_chain(original_chain)
-        except LookupError:
+        except (LookupError, ValueError):
+            # Chain not found in model, this is expected for some mismatched data
+            # logger.debug(f"Chain {chain_id} not found in structure.")
             pass 
 
     add_chain_to_temp_model(h_chain_id)
     add_chain_to_temp_model(l_chain_id)
     
     if len(ab_model) == 0:
-        return []
+        return {}
 
     # Build NeighborSearch for Antibody
     # Populating with the temporary antibody model ensures only antibody atoms are in the tree
@@ -130,7 +132,7 @@ def extract_epitope_residues(
     for ag_id in ag_chain_ids:
         try:
             ag_chain = model[ag_id]
-        except LookupError:
+        except (LookupError, ValueError):
             continue
 
         chain_epitope_list = []
