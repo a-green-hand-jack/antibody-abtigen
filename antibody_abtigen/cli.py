@@ -1202,6 +1202,170 @@ def align_command(
     click.echo(f"Output directory: {output_path}")
 
 
+@cli.command('epitope-pipeline')
+@click.option(
+    '--input', '-i', 'input_dir',
+    required=True,
+    help='Input directory containing raw CIF files',
+    type=click.Path(exists=True)
+)
+@click.option(
+    '--output', '-o', 'output_dir',
+    required=True,
+    help='Output directory for all pipeline results',
+    type=click.Path()
+)
+@click.option(
+    '--sabdab-summary',
+    default=None,
+    help='Path to SAbDab summary TSV file',
+    type=click.Path(exists=True)
+)
+@click.option(
+    '--device',
+    default='cuda',
+    show_default=True,
+    type=click.Choice(['cuda', 'cpu']),
+    help='Device for ESM-2 model'
+)
+@click.option(
+    '--similarity-threshold', '-t',
+    default=0.85,
+    show_default=True,
+    type=float,
+    help='Cosine similarity threshold for grouping'
+)
+@click.option(
+    '--distance-threshold',
+    default=5.0,
+    show_default=True,
+    type=float,
+    help='Distance threshold (Å) for epitope extraction'
+)
+@click.option(
+    '--limit', '-n',
+    default=None,
+    type=int,
+    help='Maximum number of structures to process (None = all)'
+)
+@click.option(
+    '--skip-clean',
+    is_flag=True,
+    default=False,
+    help='Skip cleaning stage (use pre-cleaned structures)'
+)
+@click.option(
+    '--skip-embed',
+    is_flag=True,
+    default=False,
+    help='Skip embedding stage (use pre-computed embeddings)'
+)
+@click.option(
+    '--skip-group',
+    is_flag=True,
+    default=False,
+    help='Skip grouping stage (use pre-computed groups)'
+)
+@click.option(
+    '--skip-align',
+    is_flag=True,
+    default=False,
+    help='Skip alignment stage'
+)
+def epitope_pipeline_command(
+    input_dir: str,
+    output_dir: str,
+    sabdab_summary: str,
+    device: str,
+    similarity_threshold: float,
+    distance_threshold: float,
+    limit: int,
+    skip_clean: bool,
+    skip_embed: bool,
+    skip_group: bool,
+    skip_align: bool
+):
+    """
+    Run the full epitope-centric pipeline.
+
+    This command runs all 4 stages of the pipeline:
+    1. Clean: Filter and clean CIF structures
+    2. Embed: Generate ESM-2 embeddings for epitopes
+    3. Group: Cluster epitopes by embedding similarity
+    4. Align: Align structures within groups
+
+    \b
+    Output structure:
+        output_dir/
+        ├── cleaned/              # Cleaned CIF files
+        ├── embeddings/           # ESM-2 embeddings (HDF5)
+        ├── grouping/             # Groups and similarity matrix
+        ├── aligned/              # Aligned structures per group
+        └── pipeline_summary.json # Overall summary
+
+    \b
+    Example:
+        antibody-abtigen epitope-pipeline \\
+            --input ./data/raw_cif \\
+            --output ./data/epitope_output \\
+            --limit 100
+    """
+    from pathlib import Path
+
+    from .epitope_pipeline import (
+        EpitopePipeline,
+        create_default_config,
+    )
+
+    # Build skip stages list
+    skip_stages = []
+    if skip_clean:
+        skip_stages.append('clean')
+    if skip_embed:
+        skip_stages.append('embed')
+    if skip_group:
+        skip_stages.append('group')
+    if skip_align:
+        skip_stages.append('align')
+
+    # Create config
+    output_path = Path(output_dir).resolve()
+    config = create_default_config(
+        data_dir=output_path,
+        device=device,
+        similarity_threshold=similarity_threshold
+    )
+    config.contact_distance_threshold = distance_threshold
+
+    # SAbDab summary path
+    sabdab_path = None
+    if sabdab_summary:
+        sabdab_path = Path(sabdab_summary)
+    else:
+        # Try default location
+        default_sabdab = Path(input_dir) / "../meta/sabdab_summary_all.tsv"
+        if default_sabdab.exists():
+            sabdab_path = default_sabdab.resolve()
+
+    # Initialize and run pipeline
+    pipeline = EpitopePipeline(
+        config=config,
+        sabdab_summary_path=sabdab_path,
+        verbose=True
+    )
+
+    result = pipeline.run_full(
+        input_dir=Path(input_dir),
+        output_dir=output_path,
+        limit=limit,
+        skip_stages=skip_stages
+    )
+
+    # Exit with appropriate code
+    if not result.success:
+        sys.exit(1)
+
+
 @cli.command('filter-interactions')
 @click.option(
     '--input', '-i', 'input_dir',

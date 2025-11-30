@@ -155,6 +155,16 @@ antibody-abtigen build --no-pymol
 
 ### Epitope Pipeline (ESM-2 Embeddings)
 
+**Full Pipeline (Recommended)**:
+```bash
+# Run all 4 stages in one command
+antibody-abtigen epitope-pipeline \
+    --input ./data/raw_cif \
+    --output ./data/epitope_output \
+    --limit 100
+```
+
+**Step-by-Step**:
 ```bash
 # Step 1: Clean and filter raw CIF files
 antibody-abtigen clean \

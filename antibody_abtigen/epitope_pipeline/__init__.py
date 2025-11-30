@@ -84,7 +84,12 @@ from .aligner import (
     save_alignment_summary_csv,
     generate_alignment_report,
 )
-# from .orchestrator import EpitopePipeline
+from .orchestrator import (
+    EpitopePipeline,
+    PipelineResult,
+    PipelineCheckpoint,
+    run_pipeline,
+)
 
 __version__ = "0.1.0"
 
@@ -157,4 +162,10 @@ __all__ = [
     'GroupAlignmentOutput',
     'save_alignment_summary_csv',
     'generate_alignment_report',
+
+    # Orchestrator
+    'EpitopePipeline',
+    'PipelineResult',
+    'PipelineCheckpoint',
+    'run_pipeline',
 ]

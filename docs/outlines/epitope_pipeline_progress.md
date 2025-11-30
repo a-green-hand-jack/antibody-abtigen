@@ -1,7 +1,7 @@
 # Epitope-Centric Pipeline Implementation Progress
 
 **Date**: 2025-11-30
-**Status**: Day 5-6 Complete ✅
+**Status**: Day 7 Complete ✅ (Pipeline Complete!)
 **Branch**: `embedding`
 
 ## Overview
@@ -509,3 +509,23 @@ This catches errors early rather than failing deep in the pipeline.
     - RMSD range: 0.000 - 0.987 Å
     - Average RMSD: 0.234 Å
     - Output: 20 CIF files (10 antigen + 10 antibody)
+
+- **2025-11-30 (Day 7)**: Pipeline Orchestrator Implementation
+  - **New module**: `orchestrator.py` - Full pipeline orchestration
+    - `EpitopePipeline` class implementing `PipelineOrchestrator` interface
+    - Coordinates all 4 stages: clean → embed → group → align
+    - Lazy initialization of components for efficiency
+    - Skip stages support (`--skip-clean`, `--skip-embed`, etc.)
+    - Summary JSON output with full statistics
+  - **Output dataclasses**:
+    - `PipelineResult`: complete execution result
+    - `PipelineCheckpoint`: for future resume support
+  - **New CLI command**: `antibody-abtigen epitope-pipeline`
+    - Options: `--input`, `--output`, `--device`, `--similarity-threshold`, `--limit`
+    - `--skip-clean/embed/group/align` flags for partial runs
+  - **Helper function**: `run_pipeline()` for programmatic use
+  - **Test results** (10 structures):
+    - Full pipeline: 51.5s
+    - Stages: load → embed → group → align
+    - Output: 1 group with 10 aligned structures
+    - All files generated correctly
