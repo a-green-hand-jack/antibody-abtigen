@@ -6,6 +6,7 @@ import contextlib
 import os
 from tqdm import tqdm
 import argparse
+from pathlib import Path
 
 
 # copied from Boltz repository
@@ -49,7 +50,7 @@ def get_pdb_id_before_cutoff_date(summary: pd.DataFrame, cutoff_date: datetime.d
         block = gemmi.cif.read(str(cif_path))[0]
         deposit_date, release_date, revision_date = get_dates(block)
         release_date = datetime.datetime.strptime(release_date, '%Y-%m-%d') # release date is used for boltz when filtering training data
-        
+
         if date_in_summary <= cutoff_date:
             before_cutoff_in_sabdab.add(pbd_id)
         if release_date <= cutoff_date:
@@ -60,16 +61,20 @@ def get_pdb_id_before_cutoff_date(summary: pd.DataFrame, cutoff_date: datetime.d
 def main(args):
     summary = pd.read_csv(args.summary_file_path)
     cutoff_date = datetime.datetime.strptime(args.cutoff_date, '%Y-%m-%d')
+    # 保存输出文件路径存在
+    # 如果目录不存在就创建
+    path = Path(args.out_dir)
+    path.mkdir(parents=True, exist_ok=True)  # parents=True 会创建父目录
     before_cutoff_in_sabdab, before_cutoff_in_boltz = get_pdb_id_before_cutoff_date(summary, cutoff_date, args.cif_dir)
-    
+
     # check whether entries before cutoff date in boltz are also in sabdab
     # if so, we can directly split data based on the date provided in sabdab
     if before_cutoff_in_boltz.issubset(before_cutoff_in_sabdab):
         print("Entries before cutoff date in boltz are also all in sabdab")
     else:
         print("Entries before cutoff date in boltz are not all in sabdab")
-        
-    
+
+
     with open(os.path.join(args.out_dir, "before_cutoff_in_sabdab.json"), "w") as f:
         json.dump(list(before_cutoff_in_sabdab), f)
 
