@@ -1,5 +1,5 @@
 [project]
-name = "antibody-abtigen"
+name = "antibody-antigen"
 version = "0.1.0"
 description = "Cross-species antibody-antigen structure dataset builder"
 readme = "README.md"
