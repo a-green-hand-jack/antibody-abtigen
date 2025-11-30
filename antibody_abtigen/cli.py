@@ -956,6 +956,252 @@ def group_command(
     click.echo(f"Output directory: {output_path}")
 
 
+@cli.command('align')
+@click.option(
+    '--groups', '-g', 'groups_path',
+    required=True,
+    help='Input groups.json file (from group step)',
+    type=click.Path(exists=True)
+)
+@click.option(
+    '--structures', '-s', 'structures_dir',
+    required=True,
+    help='Directory containing cleaned CIF files',
+    type=click.Path(exists=True)
+)
+@click.option(
+    '--output', '-o', 'output_dir',
+    required=True,
+    help='Output directory for aligned structures',
+    type=click.Path()
+)
+@click.option(
+    '--sabdab-summary',
+    default=None,
+    help='Path to SAbDab summary TSV file',
+    type=click.Path(exists=True)
+)
+@click.option(
+    '--distance-threshold',
+    default=5.0,
+    show_default=True,
+    type=float,
+    help='Distance threshold (Å) for epitope extraction'
+)
+@click.option(
+    '--use-align',
+    is_flag=True,
+    default=False,
+    help='Use PyMOL align instead of super (less robust but faster)'
+)
+@click.option(
+    '--limit', '-n',
+    default=None,
+    type=int,
+    help='Maximum number of groups to process (None = all)'
+)
+def align_command(
+    groups_path: str,
+    structures_dir: str,
+    output_dir: str,
+    sabdab_summary: str,
+    distance_threshold: float,
+    use_align: bool,
+    limit: int
+):
+    """
+    Align structures within epitope groups.
+
+    This command:
+    1. Loads groups from groups.json
+    2. Extracts epitope residues from cleaned structures
+    3. Aligns each group member to the reference based on epitope Cα atoms
+    4. Saves aligned structures as separate antigen/antibody CIF files
+
+    \b
+    Output structure:
+        output_dir/
+        └── group_XXXX/
+            ├── reference/
+            │   ├── 1A14_antigen.cif
+            │   └── 1A14_antibody.cif
+            ├── aligned/
+            │   ├── 1AFV_antigen.cif
+            │   ├── 1AFV_antibody.cif
+            │   └── ...
+            └── group_metadata.json
+    """
+    import json
+    from pathlib import Path
+
+    from .epitope_pipeline import (
+        GemmiStructureCleaner,
+        GeometricEpitopeExtractor,
+        PyMOLStructureAligner,
+        GroupResult,
+        GroupMember,
+        save_alignment_summary_csv,
+        generate_alignment_report,
+    )
+
+    click.echo("=" * 70)
+    click.echo("Epitope-based Structure Alignment")
+    click.echo("=" * 70)
+    click.echo()
+
+    groups_file = Path(groups_path).resolve()
+    structures_path = Path(structures_dir).resolve()
+    output_path = Path(output_dir).resolve()
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # SAbDab summary
+    if sabdab_summary:
+        sabdab_path = Path(sabdab_summary)
+    else:
+        sabdab_path = structures_path.parent / "meta" / "sabdab_summary_all.tsv"
+        if not sabdab_path.exists():
+            sabdab_path = None
+
+    click.echo("Configuration:")
+    click.echo(f"  Groups file: {groups_file}")
+    click.echo(f"  Structures directory: {structures_path}")
+    click.echo(f"  Output directory: {output_path}")
+    click.echo(f"  SAbDab summary: {sabdab_path if sabdab_path else 'Not found'}")
+    click.echo(f"  Distance threshold: {distance_threshold} Å")
+    click.echo(f"  Alignment method: {'align' if use_align else 'super'}")
+    click.echo(f"  Limit: {limit if limit else 'All'}")
+    click.echo()
+
+    # Load groups
+    click.echo("Loading groups...")
+    with open(groups_file, 'r') as f:
+        groups_data = json.load(f)
+
+    groups_list = groups_data.get('groups', [])
+    if limit:
+        groups_list = groups_list[:limit]
+
+    click.echo(f"  Found {len(groups_list)} groups")
+
+    if not groups_list:
+        click.echo("No groups to process.")
+        return
+
+    # Initialize components
+    click.echo("\nInitializing components...")
+    cleaner = GemmiStructureCleaner(sabdab_summary_path=sabdab_path)
+    extractor = GeometricEpitopeExtractor(distance_threshold=distance_threshold)
+    aligner = PyMOLStructureAligner(use_super=not use_align)
+
+    # Load and process structures
+    click.echo("\nLoading structures and extracting epitopes...")
+
+    # Get all unique PDB IDs from groups
+    pdb_ids = set()
+    for group_data in groups_list:
+        for member in group_data.get('members', []):
+            pdb_ids.add(member['pdb_id'])
+
+    structures = {}
+    epitopes = {}
+    errors = []
+
+    # Find CIF files
+    cif_files = {f.stem.replace('_cleaned', '').upper(): f
+                 for f in structures_path.glob("*_cleaned.cif")}
+
+    with click.progressbar(pdb_ids, label='Loading structures') as bar:
+        for pdb_id in bar:
+            if pdb_id not in cif_files:
+                errors.append(f"CIF file not found for {pdb_id}")
+                continue
+
+            cif_path = cif_files[pdb_id]
+            try:
+                cleaned, _ = cleaner.clean_structure(cif_path, skip_filtering=True)
+                if cleaned:
+                    structures[pdb_id] = cleaned
+
+                    # Extract epitope
+                    epitope = extractor.extract_epitope(cleaned)
+                    epitopes[epitope.epitope_id] = epitope
+            except Exception as e:
+                errors.append(f"Failed to process {pdb_id}: {e}")
+
+    click.echo(f"\n  Loaded {len(structures)} structures, {len(epitopes)} epitopes")
+
+    if not structures:
+        click.echo("Error: No structures loaded!", err=True)
+        sys.exit(1)
+
+    # Convert groups data to GroupResult objects
+    groups = []
+    for group_data in groups_list:
+        members = []
+        for m in group_data.get('members', []):
+            members.append(GroupMember(
+                epitope_id=m['epitope_id'],
+                pdb_id=m['pdb_id'],
+                is_reference=m['is_reference'],
+                antigen_chains=m.get('antigen_chains', []),
+                epitope_residues=m.get('epitope_residues', {}),
+                total_residues=m.get('total_residues', 0),
+                similarity_to_ref=m.get('similarity_to_ref')
+            ))
+
+        groups.append(GroupResult(
+            group_id=group_data['group_id'],
+            reference_epitope_id=group_data['reference_epitope_id'],
+            member_count=group_data['member_count'],
+            avg_similarity=group_data['avg_similarity'],
+            min_similarity=group_data.get('min_similarity', 0),
+            max_similarity=group_data.get('max_similarity', 1),
+            members=members
+        ))
+
+    # Align groups
+    click.echo("\nAligning groups...")
+    alignment_outputs = []
+
+    with click.progressbar(groups, label='Aligning') as bar:
+        for group in bar:
+            try:
+                output = aligner.align_group_detailed(
+                    group, epitopes, structures, output_path
+                )
+                alignment_outputs.append(output)
+            except Exception as e:
+                errors.append(f"Failed to align {group.group_id}: {e}")
+
+    click.echo(f"\n  Aligned {len(alignment_outputs)} groups")
+
+    # Save summary
+    if alignment_outputs:
+        summary_path = output_path / "alignment_summary.csv"
+        save_alignment_summary_csv(alignment_outputs, summary_path)
+        click.echo(f"  Summary: {summary_path}")
+
+        # Print report
+        click.echo()
+        click.echo(generate_alignment_report(alignment_outputs))
+
+    # Print errors
+    if errors:
+        click.echo()
+        click.echo(f"Warnings ({len(errors)} issues):", err=True)
+        for err in errors[:10]:
+            click.echo(f"  - {err}", err=True)
+        if len(errors) > 10:
+            click.echo(f"  ... and {len(errors) - 10} more", err=True)
+
+    # Final summary
+    click.echo()
+    click.echo("=" * 70)
+    click.echo("Alignment Complete!")
+    click.echo("=" * 70)
+    click.echo(f"Output directory: {output_path}")
+
+
 @cli.command('filter-interactions')
 @click.option(
     '--input', '-i', 'input_dir',

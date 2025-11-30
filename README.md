@@ -190,6 +190,20 @@ Output from `group` command:
 - `similarity_matrix.h5`: Full similarity matrix (if `--save-matrix`)
 - `grouping_report.txt`: Human-readable summary
 
+```bash
+# Step 4: Align structures within groups
+antibody-abtigen align \
+    --groups ./data/grouping/groups.json \
+    --structures ./data/cleaned_cif \
+    --output ./data/aligned
+```
+
+Output from `align` command:
+- `group_XXXX/reference/`: Reference structure (antigen + antibody CIF files)
+- `group_XXXX/aligned/`: Aligned structures (transformed to reference position)
+- `group_XXXX/group_metadata.json`: Alignment RMSD and transformation info
+- `alignment_summary.csv`: Per-group alignment statistics
+
 ### Command Line Options
 
 | Option | Description | Default |

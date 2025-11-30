@@ -77,7 +77,13 @@ from .grouper import (
     save_grouping_stats_csv,
     generate_grouping_report,
 )
-# from .aligner import PyMOLStructureAligner
+from .aligner import (
+    PyMOLStructureAligner,
+    AlignmentResult,
+    GroupAlignmentOutput,
+    save_alignment_summary_csv,
+    generate_alignment_report,
+)
 # from .orchestrator import EpitopePipeline
 
 __version__ = "0.1.0"
@@ -144,4 +150,11 @@ __all__ = [
     'save_groups_json',
     'save_grouping_stats_csv',
     'generate_grouping_report',
+
+    # Alignment
+    'PyMOLStructureAligner',
+    'AlignmentResult',
+    'GroupAlignmentOutput',
+    'save_alignment_summary_csv',
+    'generate_alignment_report',
 ]

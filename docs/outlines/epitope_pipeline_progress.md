@@ -1,7 +1,7 @@
 # Epitope-Centric Pipeline Implementation Progress
 
 **Date**: 2025-11-30
-**Status**: Day 4 Complete ✅
+**Status**: Day 5-6 Complete ✅
 **Branch**: `embedding`
 
 ## Overview
@@ -477,3 +477,35 @@ This catches errors early rather than failing deep in the pipeline.
     - With threshold 0.85: 1 group (all 10 epitopes highly similar)
     - Average intra-group similarity: 0.912
   - **Note**: FAISS was avoided due to incompatibility with NumPy 2.x; pure NumPy is sufficient for medium-scale data
+
+- **2025-11-30 (Day 5-6)**: PyMOL Structure Aligner Implementation
+  - **New module**: `aligner.py` - Epitope-based structure alignment
+    - `PyMOLStructureAligner` class implementing `StructureAligner` interface
+    - Aligns structures based on epitope Cα atoms using PyMOL `super` command
+    - Falls back to Biopython `Superimposer` if PyMOL unavailable
+    - Applies transformation to entire complex (antigen + antibody move together)
+  - **Output dataclasses**:
+    - `AlignmentResult`: per-structure alignment info (rmsd, rotation, translation)
+    - `GroupAlignmentOutput`: complete output for a group
+  - **Output structure**:
+    ```
+    aligned/
+    └── group_XXXX/
+        ├── reference/
+        │   ├── {PDB}_antigen.cif   # Reference position (no transformation)
+        │   └── {PDB}_antibody.cif
+        ├── aligned/
+        │   ├── {PDB}_antigen.cif   # Aligned to reference
+        │   └── {PDB}_antibody.cif
+        └── group_metadata.json     # RMSD and transformation info
+    ```
+  - **Helper functions**:
+    - `save_alignment_summary_csv()`: per-group statistics
+    - `generate_alignment_report()`: human-readable report
+  - **New CLI command**: `antibody-abtigen align`
+    - Options: `--groups`, `--structures`, `--output`, `--use-align`, `--limit`
+  - **Test results** (10 structures, 1 group):
+    - All 10 structures aligned successfully
+    - RMSD range: 0.000 - 0.987 Å
+    - Average RMSD: 0.234 Å
+    - Output: 20 CIF files (10 antigen + 10 antibody)

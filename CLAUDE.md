@@ -43,10 +43,11 @@ uv run antibody-abtigen to-yaml --input ./output --output ./output_yamls
 # Filter for antibody-antigen contacts
 uv run antibody-abtigen filter-interactions --input ./output --output ./output_filtered
 
-# Epitope pipeline: clean structures, generate embeddings, and group
+# Epitope pipeline: clean structures, generate embeddings, group, and align
 uv run antibody-abtigen clean --input ./data/raw_cif --output ./data/cleaned_cif
 uv run antibody-abtigen embed --input ./data/cleaned_cif --output ./data/embeddings --limit 10
 uv run antibody-abtigen group --input ./data/embeddings/embeddings.h5 --output ./data/grouping --threshold 0.85
+uv run antibody-abtigen align --groups ./data/grouping/groups.json --structures ./data/cleaned_cif --output ./data/aligned
 ```
 
 ### Testing
