@@ -1,7 +1,7 @@
 # Epitope-Centric Pipeline Implementation Progress
 
 **Date**: 2025-11-30
-**Status**: Day 2 Complete ✅
+**Status**: Day 4 Complete ✅
 **Branch**: `embedding`
 
 ## Overview
@@ -21,8 +21,7 @@ The pipeline groups antibody-antigen structures by **epitope structural similari
 
 **Key Technologies**:
 - ESM-2 3B model for epitope embeddings
-- FAISS GPU for similarity search
-- NetworkX for graph clustering
+- NumPy + NetworkX for similarity search and clustering (FAISS incompatible with NumPy 2.x)
 - PyMOL for epitope-based alignment
 - Gemmi for CIF processing
 
@@ -452,3 +451,29 @@ This catches errors early rather than failing deep in the pipeline.
     - Epitope residues: 19-71 (mean: 29.0)
     - Multi-chain epitopes: 2/10 (20%)
     - Embedding dimension: 2560 (L2 normalized)
+
+- **2025-11-30 (Day 4)**: Epitope Grouper Implementation
+  - **New module**: `grouper.py` - Similarity-based epitope grouping
+    - `NumpyEpitopeGrouper` class using pure NumPy + NetworkX
+    - Computes pairwise cosine similarity (dot product for L2-normalized vectors)
+    - Graph-based clustering: edges for pairs above threshold, connected components as groups
+    - Reference selection: node with highest degree (most connections) in each group
+    - Configurable options: similarity_threshold, min_group_size, exclude_same_pdb
+  - **Output dataclasses**:
+    - `GroupMember`: epitope_id, pdb_id, is_reference, antigen_chains, epitope_residues, similarity_to_ref
+    - `GroupResult`: group_id, reference_epitope_id, member_count, avg/min/max_similarity, members list
+    - `GroupingOutput`: complete output with groups list and metadata
+  - **Storage functions**:
+    - `save_similarity_matrix()`: full N×N matrix to HDF5
+    - `save_sparse_similarity()`: only pairs above threshold
+    - `save_groups_json()`: JSON with group details and member metadata
+    - `save_grouping_stats_csv()`: per-group statistics
+    - `generate_grouping_report()`: human-readable summary
+  - **New CLI command**: `antibody-abtigen group`
+    - Options: `--threshold`, `--min-size`, `--no-exclude-same-pdb`, `--use-full-embedding`, `--save-matrix`
+  - **Added to storage.py**: `load_all_encoder_outputs()` method
+  - **Test results** (10 sample embeddings):
+    - Similarity range: 0.815 - 1.000
+    - With threshold 0.85: 1 group (all 10 epitopes highly similar)
+    - Average intra-group similarity: 0.912
+  - **Note**: FAISS was avoided due to incompatibility with NumPy 2.x; pure NumPy is sufficient for medium-scale data

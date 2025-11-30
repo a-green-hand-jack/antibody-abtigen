@@ -168,6 +168,13 @@ antibody-abtigen embed \
     --output ./data/embeddings \
     --device cuda \
     --limit 100  # Optional: process first N structures
+
+# Step 3: Group epitopes by embedding similarity
+antibody-abtigen group \
+    --input ./data/embeddings/embeddings.h5 \
+    --output ./data/grouping \
+    --threshold 0.85 \
+    --save-matrix  # Optional: save full similarity matrix
 ```
 
 Output from `embed` command:
@@ -175,6 +182,13 @@ Output from `embed` command:
 - `epitope_residues.csv`: Per-residue epitope info (chain_id, auth_seq_id, residue_type)
 - `epitope_summary.csv`: Per-structure summary
 - `embedding_stats.csv`: Embedding statistics
+
+Output from `group` command:
+- `groups.json`: Group members with detailed metadata (epitope residues, similarity scores)
+- `grouping_stats.csv`: Per-group statistics (member count, avg/min/max similarity)
+- `similarity_sparse.h5`: Pairwise similarities above threshold
+- `similarity_matrix.h5`: Full similarity matrix (if `--save-matrix`)
+- `grouping_report.txt`: Human-readable summary
 
 ### Command Line Options
 

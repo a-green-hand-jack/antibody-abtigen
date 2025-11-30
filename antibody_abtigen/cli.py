@@ -771,6 +771,191 @@ def embed_command(
     click.echo(f"Output directory: {output_path}")
 
 
+@cli.command('group')
+@click.option(
+    '--input', '-i', 'input_path',
+    required=True,
+    help='Input HDF5 file containing embeddings (from embed step)',
+    type=click.Path(exists=True)
+)
+@click.option(
+    '--output', '-o', 'output_dir',
+    required=True,
+    help='Output directory for grouping results',
+    type=click.Path()
+)
+@click.option(
+    '--threshold', '-t',
+    default=0.85,
+    show_default=True,
+    type=float,
+    help='Cosine similarity threshold for grouping'
+)
+@click.option(
+    '--min-size',
+    default=2,
+    show_default=True,
+    type=int,
+    help='Minimum group size to output'
+)
+@click.option(
+    '--no-exclude-same-pdb',
+    is_flag=True,
+    default=False,
+    help='Allow epitopes from same PDB to be grouped together'
+)
+@click.option(
+    '--use-full-embedding',
+    is_flag=True,
+    default=False,
+    help='Use full antigen embedding instead of epitope-only'
+)
+@click.option(
+    '--save-matrix',
+    is_flag=True,
+    default=False,
+    help='Save full similarity matrix (can be large for many epitopes)'
+)
+def group_command(
+    input_path: str,
+    output_dir: str,
+    threshold: float,
+    min_size: int,
+    no_exclude_same_pdb: bool,
+    use_full_embedding: bool,
+    save_matrix: bool
+):
+    """
+    Group epitopes by embedding similarity.
+
+    This command:
+    1. Loads embeddings from HDF5
+    2. Computes pairwise cosine similarity
+    3. Groups epitopes above similarity threshold
+    4. Saves groups as JSON and stats as CSV
+
+    \b
+    Input:
+        embeddings.h5 (from embed command)
+
+    \b
+    Output:
+        output_dir/
+        ├── groups.json              # Groups with member details
+        ├── grouping_stats.csv       # Per-group statistics
+        ├── similarity_sparse.h5     # Pairs above threshold
+        ├── similarity_matrix.h5     # Full matrix (if --save-matrix)
+        └── grouping_report.txt      # Human-readable report
+    """
+    from pathlib import Path
+
+    from .epitope_pipeline import (
+        HDF5EmbeddingStore,
+        NumpyEpitopeGrouper,
+        save_groups_json,
+        save_grouping_stats_csv,
+        generate_grouping_report,
+    )
+
+    click.echo("=" * 70)
+    click.echo("Epitope Grouping by Embedding Similarity")
+    click.echo("=" * 70)
+    click.echo()
+
+    input_file = Path(input_path).resolve()
+    output_path = Path(output_dir).resolve()
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    click.echo("Configuration:")
+    click.echo(f"  Input embeddings: {input_file}")
+    click.echo(f"  Output directory: {output_path}")
+    click.echo(f"  Similarity threshold: {threshold}")
+    click.echo(f"  Minimum group size: {min_size}")
+    click.echo(f"  Exclude same PDB: {not no_exclude_same_pdb}")
+    click.echo(f"  Embedding type: {'full' if use_full_embedding else 'epitope'}")
+    click.echo(f"  Save full matrix: {save_matrix}")
+    click.echo()
+
+    # Load embeddings
+    click.echo("Loading embeddings...")
+    store = HDF5EmbeddingStore()
+    encoder_outputs = store.load_all_encoder_outputs(input_file)
+    click.echo(f"  Loaded {len(encoder_outputs)} embeddings")
+
+    if len(encoder_outputs) < 2:
+        click.echo("Error: Need at least 2 embeddings for grouping", err=True)
+        sys.exit(1)
+
+    # Initialize grouper
+    click.echo("\nBuilding similarity index...")
+    grouper = NumpyEpitopeGrouper(
+        similarity_threshold=threshold,
+        min_group_size=min_size,
+        exclude_same_pdb=not no_exclude_same_pdb
+    )
+    grouper.build_index_from_encoder_outputs(
+        encoder_outputs,
+        use_epitope_embedding=not use_full_embedding
+    )
+
+    # Compute similarity matrix
+    click.echo("Computing similarity matrix...")
+    sim_matrix = grouper.compute_similarity_matrix()
+    click.echo(f"  Matrix shape: {sim_matrix.shape}")
+    click.echo(f"  Similarity range: [{sim_matrix.min():.4f}, {sim_matrix.max():.4f}]")
+
+    # Find groups
+    click.echo(f"\nFinding groups (threshold={threshold})...")
+    grouping_output = grouper.find_groups_detailed(similarity_threshold=threshold)
+
+    click.echo(f"  Total epitopes: {grouping_output.total_epitopes}")
+    click.echo(f"  Grouped epitopes: {grouping_output.grouped_epitopes}")
+    click.echo(f"  Singletons: {grouping_output.singleton_count}")
+    click.echo(f"  Number of groups: {len(grouping_output.groups)}")
+
+    # Save outputs
+    click.echo("\nSaving outputs...")
+
+    # Groups JSON
+    groups_path = output_path / "groups.json"
+    save_groups_json(grouping_output, groups_path)
+    click.echo(f"  Groups: {groups_path}")
+
+    # Grouping stats CSV
+    stats_path = output_path / "grouping_stats.csv"
+    save_grouping_stats_csv(grouping_output, stats_path)
+    click.echo(f"  Stats: {stats_path}")
+
+    # Sparse similarity (pairs above threshold)
+    sparse_path = output_path / "similarity_sparse.h5"
+    grouper.save_sparse_similarity(sparse_path, threshold=threshold)
+    click.echo(f"  Sparse similarity: {sparse_path}")
+
+    # Full matrix (optional)
+    if save_matrix:
+        matrix_path = output_path / "similarity_matrix.h5"
+        grouper.save_similarity_matrix(matrix_path)
+        click.echo(f"  Full matrix: {matrix_path}")
+
+    # Human-readable report
+    report = generate_grouping_report(grouping_output)
+    report_path = output_path / "grouping_report.txt"
+    with open(report_path, 'w') as f:
+        f.write(report)
+    click.echo(f"  Report: {report_path}")
+
+    # Print report to console
+    click.echo()
+    click.echo(report)
+
+    # Final summary
+    click.echo()
+    click.echo("=" * 70)
+    click.echo("Grouping Complete!")
+    click.echo("=" * 70)
+    click.echo(f"Output directory: {output_path}")
+
+
 @cli.command('filter-interactions')
 @click.option(
     '--input', '-i', 'input_dir',

@@ -352,6 +352,31 @@ class HDF5EmbeddingStore(EmbeddingStore):
                 embedding_method=grp.attrs['embedding_method']
             )
 
+    def load_all_encoder_outputs(self, input_path: Path) -> List[EncoderOutput]:
+        """
+        Load all EncoderOutput objects from HDF5.
+
+        Args:
+            input_path: HDF5 file path
+
+        Returns:
+            List of EncoderOutput objects
+        """
+        input_path = Path(input_path)
+        if not input_path.exists():
+            raise FileNotFoundError(f"HDF5 file not found: {input_path}")
+
+        outputs = []
+        epitope_ids = self.list_epitope_ids(input_path)
+
+        for epitope_id in epitope_ids:
+            output = self.load_encoder_output(input_path, epitope_id)
+            if output:
+                outputs.append(output)
+
+        logger.info(f"Loaded {len(outputs)} encoder outputs from {input_path}")
+        return outputs
+
     def list_epitope_ids(self, input_path: Path) -> List[str]:
         """
         List all epitope IDs in the HDF5 file.

@@ -68,7 +68,15 @@ from .epitope_log import (
     save_embedding_stats_csv,
     generate_epitope_report,
 )
-# from .grouper import FAISSEpitopeGrouper
+from .grouper import (
+    NumpyEpitopeGrouper,
+    GroupMember,
+    GroupResult,
+    GroupingOutput,
+    save_groups_json,
+    save_grouping_stats_csv,
+    generate_grouping_report,
+)
 # from .aligner import PyMOLStructureAligner
 # from .orchestrator import EpitopePipeline
 
@@ -127,4 +135,13 @@ __all__ = [
     'save_epitope_summary_csv',
     'save_embedding_stats_csv',
     'generate_epitope_report',
+
+    # Grouping
+    'NumpyEpitopeGrouper',
+    'GroupMember',
+    'GroupResult',
+    'GroupingOutput',
+    'save_groups_json',
+    'save_grouping_stats_csv',
+    'generate_grouping_report',
 ]
