@@ -84,3 +84,31 @@ python scripts/reference/05_cluster.py \
 
 ### 脚本参数说明
 脚本 `05_cluster.py` 默认并未开启 `--gpu 1`。如果需要强制开启 GPU 加速，请确保在调用 `subprocess.run` 时添加了 `--gpu 1` 参数，或者确认 `easy-cluster` 在检测到 GPU 时是否自动启用。建议显式修改脚本以确保使用 GPU。
+
+## 5. 实际部署记录 (2025-11-30)
+
+以下是在 `/ibex/user/wuj0c/envs/mmseqs` 实际部署时的操作记录，特别注意解决了解压后文件夹名称冲突的问题。
+
+```bash
+# 1. 创建环境
+mamba create -p /ibex/user/wuj0c/envs/mmseqs python=3.10 -y
+
+# 2. 安装依赖
+mamba install -p /ibex/user/wuj0c/envs/mmseqs -c conda-forge cudatoolkit=11.8 -y
+
+# 3. 下载与安装 MMseqs2
+cd /ibex/user/wuj0c/envs/mmseqs/bin
+wget https://mmseqs.com/latest/mmseqs-linux-gpu.tar.gz
+tar xvfz mmseqs-linux-gpu.tar.gz
+
+# 4. 处理文件冲突并移动二进制文件
+# 解压出的文件夹也叫 mmseqs，不能直接 mv mmseqs/bin/mmseqs . (因为当前目录下已有同名目录)
+cp mmseqs/bin/mmseqs ./mmseqs_bin   # 先复制并重命名
+chmod +x mmseqs_bin                 # 赋予执行权限
+rm -rf mmseqs                       # 删除解压出的文件夹
+mv mmseqs_bin mmseqs                # 改回原名
+
+# 5. 清理
+rm mmseqs-linux-gpu.tar.gz
+```
+
