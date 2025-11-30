@@ -202,32 +202,41 @@ tests/
 
 ### Module I: Structure Cleaner (`cleaner.py`) - ✅ DONE
 
-**Implemented**: `GemmiStructureCleaner` class (363 lines)
+**Implemented**: `GemmiStructureCleaner` class (370 lines)
 
 **Features**:
-- Parses mmCIF files using Gemmi (fast and spec-compliant)
-- Identifies antigen and antibody chains using SAbDab heuristics:
-  - Heavy chain: 250-500 residues
-  - Light chain: 200-250 residues
-  - Antigen: everything else
-- Standardizes chain IDs:
-  - Antigen chains → A, B, C, D, ...
-  - Antibody heavy → H
-  - Antibody light → L
+- Parses mmCIF files using Biopython for sequence extraction
+- **Uses SAbDab metadata** (`sabdab_summary_all.tsv`) for accurate chain classification:
+  - Reads `Hchain`, `Lchain`, `antigen_chain` columns
+  - Falls back to length heuristics only when metadata unavailable
+- **Preserves original PDB chain IDs** (no renaming):
+  - Avoids PyMOL visualization issues
+  - Maintains structure integrity
+  - Easier to trace back to original PDB entries
 - Builds auth_seq_id → 0-based index mapping for ESM-2
+- Uses battle-tested `structure.py::clean_structure()` for CIF saving
 - Removes water (HOH) and HETATM records
 - Preserves mmCIF metadata categories
 
 **Example usage**:
 ```python
-cleaner = GemmiStructureCleaner(output_dir=Path("./cleaned"))
-cleaned = cleaner.clean_structure(Path("7K8T.cif"))
+cleaner = GemmiStructureCleaner(
+    output_dir=Path("./cleaned"),
+    sabdab_summary_path=Path("data/meta/sabdab_summary_all.tsv")
+)
+cleaned = cleaner.clean_structure(Path("1a14.cif"))
 
 # Result:
-# - cleaned.pdb_id = "7K8T"
-# - cleaned.chain_mappings = [ChainMapping(original="E", standardized="A", type="antigen"), ...]
-# - cleaned.file_path = "./cleaned/7K8T_cleaned.cif"
+# - cleaned.pdb_id = "1A14"
+# - cleaned.chain_mappings = [
+#     ChainMapping(original="N", standardized="N", type="antigen"),  # NO renaming!
+#     ChainMapping(original="H", standardized="H", type="antibody_heavy"),
+#     ChainMapping(original="L", standardized="L", type="antibody_light"),
+#   ]
+# - cleaned.file_path = "./cleaned/1A14_cleaned.cif"
 ```
+
+**Key design decision**: `standardized_chain_id` = `original_chain_id` (no renaming). The ChainMapping dataclass tracks the chain type classification, but the CIF file retains original chain IDs.
 
 ### Module II: Epitope Extractor (`extractor.py`) - ✅ DONE
 
@@ -376,3 +385,11 @@ This catches errors early rather than failing deep in the pipeline.
   - Added 13 unit tests + 1 integration test
   - All 29 tests passing
   - Validated on 5 real antibody-antigen complexes from SAbDab
+
+- **2025-11-30 (Day 2 Fix)**: Fixed chain classification and structure preservation
+  - **Critical fix**: Use SAbDab metadata for chain classification instead of length heuristics
+  - **Critical fix**: Preserve original PDB chain IDs (no renaming) to avoid PyMOL issues
+  - Reuse battle-tested `structure.py::clean_structure()` for CIF saving
+  - Removed duplicate `antibody_abtigen/cleaner.py` file
+  - All test outputs moved to `tests/cleaner/` directory
+  - Verified: Cleaned structures display correctly in PyMOL with proper atom coordinates

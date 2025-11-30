@@ -58,7 +58,8 @@ class GemmiStructureCleaner(StructureCleaner):
         self,
         remove_water: bool = True,
         remove_hetatm: bool = True,
-        output_dir: Optional[Path] = None
+        output_dir: Optional[Path] = None,
+        sabdab_summary_path: Optional[Path] = None
     ):
         """
         Initialize cleaner.
@@ -67,10 +68,13 @@ class GemmiStructureCleaner(StructureCleaner):
             remove_water: Remove water molecules (HOH)
             remove_hetatm: Remove HETATM records (ligands, non-standard residues)
             output_dir: Directory to save cleaned CIF files (if None, use temp)
+            sabdab_summary_path: Path to SAbDab summary TSV for chain type info
         """
         self.remove_water = remove_water
         self.remove_hetatm = remove_hetatm
         self.output_dir = output_dir
+        self.sabdab_summary_path = sabdab_summary_path
+        self._sabdab_cache = None
 
     def clean_structure(self, cif_path: Path) -> CleanedStructure:
         """
@@ -94,8 +98,8 @@ class GemmiStructureCleaner(StructureCleaner):
             # Step 1: Parse CIF with Biopython to get sequences
             chain_info = self._extract_chain_info(cif_path)
 
-            # Step 2: Classify chains as antigen/antibody
-            chain_types = self._classify_chains(chain_info)
+            # Step 2: Classify chains as antigen/antibody (using SAbDab metadata if available)
+            chain_types = self._classify_chains(chain_info, pdb_id)
 
             # Step 3: Create standardized chain mappings
             chain_mappings = self._create_chain_mappings(
@@ -181,26 +185,67 @@ class GemmiStructureCleaner(StructureCleaner):
 
         return chain_info
 
+    def _load_sabdab_cache(self):
+        """Load SAbDab summary file into cache."""
+        if self._sabdab_cache is not None:
+            return
+
+        if self.sabdab_summary_path is None or not self.sabdab_summary_path.exists():
+            self._sabdab_cache = {}
+            return
+
+        import csv
+        self._sabdab_cache = {}
+
+        with open(self.sabdab_summary_path, 'r') as f:
+            reader = csv.DictReader(f, delimiter='\t')
+            for row in reader:
+                pdb_id = row['pdb'].upper()
+                self._sabdab_cache[pdb_id] = {
+                    'Hchain': row.get('Hchain', ''),
+                    'Lchain': row.get('Lchain', ''),
+                    'antigen_chain': row.get('antigen_chain', ''),
+                }
+
     def _classify_chains(
-        self, chain_info: Dict[str, Dict]
+        self, chain_info: Dict[str, Dict], pdb_id: str
     ) -> Dict[str, str]:
         """
         Classify chains as antigen, antibody heavy, or antibody light.
 
-        Uses SAbDab heuristics:
-        - Heavy chain: 250-500 residues (typical VH-CH1-CH2-CH3)
-        - Light chain: 200-250 residues (typical VL-CL)
-        - Antigen: Everything else
+        Uses SAbDab metadata if available, otherwise falls back to heuristics.
 
         Args:
             chain_info: Chain information dict
+            pdb_id: PDB ID for SAbDab lookup
 
         Returns:
             Dict mapping chain_id → 'antigen' | 'antibody_heavy' | 'antibody_light'
         """
         chain_types = {}
 
+        # Try SAbDab metadata first
+        self._load_sabdab_cache()
+        sabdab_info = self._sabdab_cache.get(pdb_id.upper(), {})
+
+        hchain = sabdab_info.get('Hchain', '')
+        lchain = sabdab_info.get('Lchain', '')
+        antigen_chains = sabdab_info.get('antigen_chain', '').split('|')
+
+        # Mark known chains from SAbDab
+        for chain_id in chain_info.keys():
+            if chain_id == hchain:
+                chain_types[chain_id] = 'antibody_heavy'
+            elif chain_id == lchain:
+                chain_types[chain_id] = 'antibody_light'
+            elif chain_id in antigen_chains:
+                chain_types[chain_id] = 'antigen'
+
+        # For unknown chains, use heuristics as fallback
         for chain_id, info in chain_info.items():
+            if chain_id in chain_types:
+                continue  # Already classified
+
             length = info['length']
 
             # Heavy chain: typically 250-500 residues
@@ -222,12 +267,15 @@ class GemmiStructureCleaner(StructureCleaner):
         chain_types: Dict[str, str]
     ) -> List[ChainMapping]:
         """
-        Create standardized chain mappings.
+        Create chain mappings (NO renaming - uses original PDB chain IDs).
 
-        Standardization rules:
-        - Antigen chains: A, B, C, D, ... (alphabetical order by original ID)
-        - Antibody heavy: H
-        - Antibody light: L
+        For epitope-centric pipeline, we don't rename chains because:
+        1. Preserves original PDB structure integrity
+        2. Avoids PyMOL visualization issues
+        3. Easier to trace back to original PDB files
+
+        The standardized_chain_id field is set to the original_chain_id.
+        Chain type information is preserved in the chain_type field.
 
         Also builds auth_seq_id → 0-based index mapping.
 
@@ -239,40 +287,14 @@ class GemmiStructureCleaner(StructureCleaner):
         Returns:
             List of ChainMapping objects
         """
-        # Separate chains by type
-        antigen_chains = []
-        heavy_chains = []
-        light_chains = []
+        mappings = []
 
         for chain_id in sorted(chain_info.keys()):
             chain_type = chain_types[chain_id]
-            if chain_type == 'antigen':
-                antigen_chains.append(chain_id)
-            elif chain_type == 'antibody_heavy':
-                heavy_chains.append(chain_id)
-            elif chain_type == 'antibody_light':
-                light_chains.append(chain_id)
 
-        # Create mappings
-        mappings = []
-
-        # Antigen chains: A, B, C, ...
-        for idx, original_id in enumerate(antigen_chains):
-            standardized_id = chr(ord('A') + idx)  # A, B, C, ...
+            # Use original chain ID as standardized ID (no renaming)
             mappings.append(self._create_mapping(
-                pdb_id, original_id, standardized_id, 'antigen', chain_info
-            ))
-
-        # Antibody heavy: H (take first heavy chain if multiple)
-        if heavy_chains:
-            mappings.append(self._create_mapping(
-                pdb_id, heavy_chains[0], 'H', 'antibody_heavy', chain_info
-            ))
-
-        # Antibody light: L (take first light chain if multiple)
-        if light_chains:
-            mappings.append(self._create_mapping(
-                pdb_id, light_chains[0], 'L', 'antibody_light', chain_info
+                pdb_id, chain_id, chain_id, chain_type, chain_info
             ))
 
         return mappings
@@ -324,22 +346,23 @@ class GemmiStructureCleaner(StructureCleaner):
         chain_mappings: List[ChainMapping]
     ) -> Path:
         """
-        Clean CIF file and save with standardized chain IDs.
+        Clean CIF file by filtering chains and removing water/HETATM.
 
-        Uses Gemmi to:
-        - Filter chains
-        - Remove water/HETATM
-        - Rename chains to standardized IDs
-        - Preserve metadata
+        IMPORTANT: Does NOT rename chain IDs - uses original PDB chain IDs.
+        Chain ID standardization is tracked in ChainMapping but not applied to files.
+
+        Uses existing clean_structure() from structure.py which is battle-tested.
 
         Args:
             input_cif: Input CIF path
             pdb_id: PDB ID
-            chain_mappings: Chain mappings with standardization
+            chain_mappings: Chain mappings (original_chain_id used)
 
         Returns:
             Path to cleaned CIF file
         """
+        from ..structure import clean_structure as clean_cif
+
         # Determine output path
         if self.output_dir:
             output_path = self.output_dir / f"{pdb_id}_cleaned.cif"
@@ -347,81 +370,16 @@ class GemmiStructureCleaner(StructureCleaner):
         else:
             output_path = input_cif.parent / f"{pdb_id}_cleaned.cif"
 
-        # Build chain ID mapping
-        original_to_std = {
-            m.original_chain_id: m.standardized_chain_id
-            for m in chain_mappings
-        }
-        keep_chains = set(original_to_std.keys())
+        # Get original chain IDs to keep (no renaming)
+        keep_chains = [m.original_chain_id for m in chain_mappings]
 
-        # Load CIF with Gemmi
-        doc = gemmi.cif.read_file(str(input_cif))
-        block = doc.sole_block()
-
-        # Find atom_site table
-        table = block.find_mmcif_category("_atom_site")
-        if not table:
-            # No atoms, just write original
-            doc.write_file(str(output_path))
-            return output_path
-
-        tags = list(table.tags)
-
-        def get_idx(tag: str) -> int:
-            """Get column index for a tag."""
-            full_tag = tag if tag.startswith("_") else f"_atom_site.{tag}"
-            try:
-                return tags.index(full_tag)
-            except ValueError:
-                return -1
-
-        # Get column indices
-        idx_auth = get_idx("_atom_site.auth_asym_id")
-        idx_label = get_idx("_atom_site.label_asym_id")
-        idx_comp = get_idx("_atom_site.label_comp_id")
-        idx_group = get_idx("_atom_site.group_PDB")
-
-        # Filter and rename rows
-        rows_to_remove = []
-        for i, row in enumerate(table):
-            auth_chain = row[idx_auth] if idx_auth >= 0 else ""
-            label_chain = row[idx_label] if idx_label >= 0 else ""
-            comp_id = row[idx_comp] if idx_comp >= 0 else ""
-            group = row[idx_group] if idx_group >= 0 else ""
-
-            keep = True
-
-            # Filter by chain
-            if auth_chain not in keep_chains:
-                keep = False
-
-            # Remove water
-            if keep and self.remove_water and comp_id == "HOH":
-                keep = False
-
-            # Remove HETATM
-            if keep and self.remove_hetatm and group == "HETATM":
-                keep = False
-
-            if not keep:
-                rows_to_remove.append(i)
-            else:
-                # Rename chain to standardized ID
-                if auth_chain in original_to_std:
-                    new_chain = original_to_std[auth_chain]
-                    if idx_auth >= 0:
-                        row[idx_auth] = new_chain
-                    if idx_label >= 0:
-                        row[idx_label] = new_chain
-
-        # Remove filtered rows (reverse order to preserve indices)
-        for offset, row_idx in enumerate(rows_to_remove):
-            table.remove_row(row_idx - offset)
-
-        # Check for empty loops
-        block.check_empty_loops("_atom_site")
-
-        # Write output
-        doc.write_file(str(output_path))
+        # Use existing clean_structure function (battle-tested)
+        clean_cif(
+            input_cif=str(input_cif),
+            output_cif=str(output_path),
+            keep_chains=keep_chains,
+            remove_water=self.remove_water,
+            remove_hetatm=self.remove_hetatm
+        )
 
         return output_path
