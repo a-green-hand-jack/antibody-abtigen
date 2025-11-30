@@ -41,13 +41,13 @@ def levenshtein_distance(seq1, seq2):
 def get_cdr(original_seq, masked_seq):
     # find all X positions
     x_indices = [i for i, char in enumerate(masked_seq) if char == 'X']
-    
+
     # find breakpoints (the positions where the distance between two Xs is greater than 1)
     breaks = []
     for i in range(1, len(x_indices)):
         if x_indices[i] - x_indices[i-1] > 1:
             breaks.append(i)
-            
+
     # split x_indices into three groups according to the breakpoints
     start1 = 0
     end1 = breaks[0]
@@ -55,12 +55,12 @@ def get_cdr(original_seq, masked_seq):
     end2 = breaks[1]
     start3 = breaks[1]
     end3 = len(x_indices)
-    
+
     # get the corresponding CDR sequences
     cdr1 = original_seq[x_indices[start1]:x_indices[end1-1]+1]
     cdr2 = original_seq[x_indices[start2]:x_indices[end2-1]+1]
     cdr3 = original_seq[x_indices[start3]:x_indices[end3-1]+1]
-    
+
     return cdr1, cdr2, cdr3
 
 def decuplicate(pdb_id, group_df, distance_threshold):
@@ -95,25 +95,25 @@ def decuplicate(pdb_id, group_df, distance_threshold):
     return reserved_entry_list, log_content
 
 def main(args):
-    
+
     current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = os.path.join(args.output_dir, 'logs-for-decuplication', f'distance_threshold_{args.distance_threshold}', current_time)
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, f'decuplication_{current_time}.log')
 
-    logging.basicConfig(filename=log_path, 
-                        level=logging.WARNING, 
-                        format='%(asctime)s - %(levelname)s - %(message)s', 
+    logging.basicConfig(filename=log_path,
+                        level=logging.WARNING,
+                        format='%(asctime)s - %(levelname)s - %(message)s',
                         filemode='a')
-   
+
     distance_threshold = args.distance_threshold
-    
+
     output_file_name = f'{args.output_file_name}-distance_threshold_{distance_threshold}'
 
     original_data_path = args.original_data_path
     with open(original_data_path, 'r') as f:
         original_data = pd.read_csv(f)
-        
+
     all_reserved_entry_list = list()
 
     grouped_data = original_data.groupby('pdb')
@@ -136,17 +136,17 @@ def main(args):
         if len(log_content) > 0:
             for line in log_content:
                 logging.warning(line)
-            
+
     all_reserved_df = pd.DataFrame(all_reserved_entry_list)
     all_reserved_df.to_csv(os.path.join(args.output_dir, f'{output_file_name}.csv'), index=False)
     print(f'decuplication is done!\nThe result is saved in {os.path.join(args.output_dir, f"{output_file_name}.csv")}.')
 
-    
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--distance_threshold", type=int, default=9)
-    parser.add_argument("--original_data_path", type=str, default="./data/summary.csv")
-    parser.add_argument("--output_dir", type=str, default="./data")
+    parser.add_argument("--original_data_path", type=str, default="./data/summary/summary.csv")
+    parser.add_argument("--output_dir", type=str, default="./data/decuplication/")
     parser.add_argument("--output_file_name", type=str, default="summary-decuplication") # no extension
     args = parser.parse_args()
     main(args)

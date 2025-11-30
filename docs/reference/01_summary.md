@@ -45,7 +45,40 @@
 
 ## 输出
 
-*   处理后的 JSON 数据文件。
-*   对应的 CSV 表格文件。
-*   处理失败列表 `failed_to_process_with_bio.json`。
-*   详细的处理日志 `logs-for-preprocess/`。
+脚本执行后，将在指定的输出目录（`--output_dir`）生成以下文件结构：
+
+### 文件结构
+
+```text
+output_dir/
+├── summary.json                 # 处理后的核心数据文件（JSON格式）
+├── summary.csv                  # 对应的表格文件（CSV格式），方便查看
+├── failed_to_process_with_bio.json # 处理失败的条目名称列表
+└── logs-for-preprocess/         # 日志文件夹
+    └── processing_YYYYMMDD_HHMMSS.log # 详细的运行日志
+```
+
+### JSON/CSV 字段说明
+
+`summary.json` 中的每个条目（Key 为 `entry_name`）和 `summary.csv` 的每一行包含以下字段：
+
+*   **`pdb`**: PDB ID（小写）。
+*   **`file_name`**: (仅 CSV) 条目的唯一标识符，格式为 `{Pdb_id}_{H_chain}_{L_chain}_{Antigen_chains}`。
+*   **`H_chain_id`**: 重链的链 ID。
+*   **`L_chain_id`**: 轻链的链 ID。
+*   **`H_chain_seq`**: 提取出的重链氨基酸序列（基于 Chothia 编号，去除了非 Fv 区域）。
+*   **`L_chain_seq`**: 提取出的轻链氨基酸序列（基于 Chothia 编号，去除了非 Fv 区域）。
+*   **`H_chain_masked_seq`**: 掩码处理后的重链序列（CDR 区域被替换为 'X'）。
+*   **`L_chain_masked_seq`**: 掩码处理后的轻链序列（CDR 区域被替换为 'X'）。
+*   **`antigen_chain_id`**: 抗原链 ID 的列表（List）。
+*   **`antigen_seq`**: (JSON 中) 抗原链序列的字典，Key 为链 ID，Value 为序列；(CSV 中) 序列的字符串表示。
+*   **`antigen_type`**: 抗原类型（例如 "protein"）。
+*   **`resolution`**: 晶体结构的分辨率（单位：Å）。
+*   **`scfv`**: 布尔值，指示是否为 scFv 结构。
+*   **`date`**: 结构发布的日期。
+*   **`index_in_summary`**: 该条目在原始 SAbDab 摘要文件中的索引位置。
+
+### 错误处理
+
+*   **`failed_to_process_with_bio.json`**: 记录了那些因为 PDB 文件解析失败、文件缺失或其他 Biopython 处理错误而被丢弃的条目。
+*   **日志文件**: 记录了每个处理失败条目的具体原因（例如 "Heavy chain error... No module named 'anarci'"）。
