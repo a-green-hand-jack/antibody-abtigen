@@ -71,6 +71,12 @@
     *   **原因**: `gemmi.Structure.add_model(model)` 会创建模型的**副本**。如果随后向原始 `model` 变量添加链，这些链不会进入 Structure 中。
     *   **解决**: 在添加 Model 后，通过 `model = structure[0]` 获取 Structure 内部的引用，再进行操作。此外，写入前必须调用 `setup_entities()` 以生成合法的 mmCIF。
 
+*   **VSCode Protein Viewer 显示混乱 (已知问题)**:
+    *   **现象**: 拆分后的 CIF 文件在 PyMOL 中能正常显示，但在 VSCode 的 Protein Viewer 插件中显示为散乱的点，无法看到蛋白质结构。
+    *   **原因**: Gemmi 的 `make_mmcif_document()` 生成的 CIF 文件中，`_chem_comp.type` 字段为空 (`.`)，而非原始文件中的 `'L-peptide linking'`。Protein Viewer 依赖此字段来推断残基类型和肽键连接，缺失后无法正确构建结构。
+    *   **影响**: 仅影响 VSCode Protein Viewer 的可视化，不影响实际坐标数据。PyMOL 等工具能根据残基名自动推断类型，因此显示正常。
+    *   **状态**: 暂不修复。如需在 VSCode 中查看，可使用原始对齐文件 (`data/aligned/`) 或将 CIF 转换为 PDB 格式。
+
 # 5. 验证 (Verification)
 
 脚本运行完成后，检查 `data/cleaned_split` 目录。以 Cluster 34 为例，应包含 38 个子文件夹，每个文件夹内包含 `antigen.cif` 和 `antibody.cif`。
