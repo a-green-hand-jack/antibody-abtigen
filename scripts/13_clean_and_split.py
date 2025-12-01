@@ -69,7 +69,7 @@ def process_entry(row: pd.Series, input_aligned_dir: Path, output_base_dir: Path
     cluster_id = row["cluster_id"]
     epitope_id = row["epitope_id"]
 
-    # Skip unclustered if necessary, but usually we want to process everything in the summary
+    # Skip unclustered if necessary
     if cluster_id == -1:
         return
 
@@ -77,8 +77,6 @@ def process_entry(row: pd.Series, input_aligned_dir: Path, output_base_dir: Path
     input_path = input_aligned_dir / str(cluster_id) / f"{epitope_id}.cif"
 
     if not input_path.exists():
-        # This might happen if the cluster size was < min_size in the previous step
-        # logger.debug(f"Input file not found (likely skipped in alignment): {input_path}")
         return
 
     try:
@@ -87,8 +85,6 @@ def process_entry(row: pd.Series, input_aligned_dir: Path, output_base_dir: Path
 
         # 2. Clean: Remove Waters
         st.remove_waters()
-        # st.remove_ligands_and_waters() # Maybe too aggressive if ligand is part of antigen?
-        # Let's stick to removing waters and then filtering by chain ID.
 
         # 3. Identify Target Chains
         h_chain = str(row["H_chain"]) if pd.notna(row["H_chain"]) else ""
@@ -100,50 +96,52 @@ def process_entry(row: pd.Series, input_aligned_dir: Path, output_base_dir: Path
         # 4. Create New Structures
         st_ab = gemmi.Structure()
         st_ab.name = f"{epitope_id}_antibody"
-        model_ab = gemmi.Model("1")
-        st_ab.add_model(model_ab)
+        if st.cell.a > 0:
+            st_ab.cell = st.cell
+        st_ab.spacegroup_hm = st.spacegroup_hm
+
+        # Add model and get reference to it
+        st_ab.add_model(gemmi.Model("1"))
+        model_ab = st_ab[0]
 
         st_ag = gemmi.Structure()
         st_ag.name = f"{epitope_id}_antigen"
-        model_ag = gemmi.Model("1")
-        st_ag.add_model(model_ag)
+        if st.cell.a > 0:
+            st_ag.cell = st.cell
+        st_ag.spacegroup_hm = st.spacegroup_hm
+
+        # Add model and get reference to it
+        st_ag.add_model(gemmi.Model("1"))
+        model_ag = st_ag[0]
 
         # 5. Distribute Chains
-        # We iterate over the first model (assuming standard PDB structure)
         source_model = st[0]
 
         found_ab = False
         found_ag = False
 
         for chain in source_model:
-            # Check against chain.name (which is label_asym_id in mmCIF usually, or auth_asym_id depending on how Gemmi read it)
-            # Gemmi read_structure usually maps label_asym_id to chain.name by default for CIF.
-            # Our metadata usually comes from SAbDab summary which uses auth_asym_id?
-            # This is a potential risk point.
-            # However, 09_extract_epitope used `model[id]` which looks up by name.
-            # Let's try to match both if possible, or trust `chain.name`.
-
             cid = chain.name
-
             if cid in ab_chains:
                 model_ab.add_chain(chain.clone())
                 found_ab = True
             elif cid in ag_chains:
                 model_ag.add_chain(chain.clone())
                 found_ag = True
-            # Else: Ignore (non-interacting chain or junk)
 
         # 6. Save
         if found_ab and found_ag:
             output_dir = output_base_dir / str(cluster_id) / epitope_id
             output_dir.mkdir(parents=True, exist_ok=True)
 
+            # Ensure entities are setup for valid mmCIF
+            st_ab.setup_entities()
+            st_ag.setup_entities()
+
             st_ab.make_mmcif_document().write_file(str(output_dir / "antibody.cif"))
             st_ag.make_mmcif_document().write_file(str(output_dir / "antigen.cif"))
         else:
-            logger.warning(
-                f"Skipping {epitope_id}: Missing chains (Found Ab: {found_ab}, Found Ag: {found_ag})"
-            )
+            pass
 
     except Exception as e:
         logger.error(f"Error processing {epitope_id}: {e}")

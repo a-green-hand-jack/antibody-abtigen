@@ -64,7 +64,14 @@
     - [x] 运行脚本。
     - [x] 检查输出目录结构。
 
-# 4. 验证 (Verification)
+# 4. 问题排查 (Troubleshooting)
+
+*   **空文件问题 (Empty CIFs)**:
+    *   **现象**: 生成的 CIF 文件仅几百字节，只包含 header 无原子。
+    *   **原因**: `gemmi.Structure.add_model(model)` 会创建模型的**副本**。如果随后向原始 `model` 变量添加链，这些链不会进入 Structure 中。
+    *   **解决**: 在添加 Model 后，通过 `model = structure[0]` 获取 Structure 内部的引用，再进行操作。此外，写入前必须调用 `setup_entities()` 以生成合法的 mmCIF。
+
+# 5. 验证 (Verification)
 
 脚本运行完成后，检查 `data/cleaned_split` 目录。以 Cluster 34 为例，应包含 38 个子文件夹，每个文件夹内包含 `antigen.cif` 和 `antibody.cif`。
 
