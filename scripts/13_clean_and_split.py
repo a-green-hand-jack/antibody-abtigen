@@ -30,15 +30,24 @@ ENTITY_FILTER_CATEGORIES = {
     "_entity": "id",
     "_entity_poly": "entity_id",
     "_entity_poly_seq": "entity_id",
-    "_struct_asym": "entity_id",
     "_entity_src_gen": "entity_id",
     "_entity_src_nat": "entity_id",
     "_pdbx_entity_nonpoly": "entity_id",
+    "_pdbx_entity_branch": "entity_id",
+    "_pdbx_entity_branch_list": "entity_id",
+    "_pdbx_entity_branch_link": "entity_id",
 }
 
 # Categories that need special handling (multiple chain columns)
 MULTI_CHAIN_CATEGORIES = {
     "_struct_conn": ["ptnr1_auth_asym_id", "ptnr2_auth_asym_id"],
+}
+
+# Categories that need filtering by label_asym_id (internal chain ID)
+LABEL_ASYM_FILTER_CATEGORIES = {
+    "_struct_asym": "id",
+    "_pdbx_branch_scheme": "asym_id",
+    "_pdbx_nonpoly_scheme": "asym_id",
 }
 
 
@@ -114,12 +123,138 @@ def get_chain_entity_mapping(block: gemmi.cif.Block) -> Dict[str, str]:
     return mapping
 
 
+def get_label_asym_id_mapping(block: gemmi.cif.Block) -> Dict[str, Tuple[str, str]]:
+    """
+    从 _atom_site 获取 label_asym_id -> (auth_asym_id, label_entity_id) 的映射。
+    Returns: {"A": ("A", "1"), "EA": ("A", "11"), ...}
+
+    label_asym_id 是内部链 ID，每个结构单元唯一。
+    auth_asym_id 是作者链 ID，蛋白和其附属配体共用。
+    """
+    mapping = {}
+    try:
+        atom_site = block.find_mmcif_category("_atom_site.")
+        if not atom_site:
+            return mapping
+
+        label_asym_col = atom_site.find_column("label_asym_id")
+        auth_asym_col = atom_site.find_column("auth_asym_id")
+        entity_col = atom_site.find_column("label_entity_id")
+
+        for label_asym, auth_asym, entity_id in zip(label_asym_col, auth_asym_col, entity_col):
+            label_asym = label_asym.strip()
+            auth_asym = auth_asym.strip()
+            entity_id = entity_id.strip()
+            if label_asym and label_asym not in mapping:
+                mapping[label_asym] = (auth_asym, entity_id)
+    except (ValueError, RuntimeError):
+        pass
+
+    return mapping
+
+
+def get_connected_ligand_info(
+    block: gemmi.cif.Block, target_auth_chain_ids: Set[str]
+) -> Tuple[Set[str], Set[str], Set[str]]:
+    """
+    从 _struct_conn 找出与目标链共价连接的配体信息。
+
+    返回: (connected_auth_asym_ids, connected_label_asym_ids, connected_entity_ids)
+
+    在 mmCIF 中，蛋白链 A 可能有附属的糖链 (如 NAG)，它们的:
+    - auth_asym_id 可能相同 (都是 "A") 或不同 (如 "K")
+    - label_asym_id 不同 (蛋白是 "A"，糖是 "EA" 或 "S")
+    - entity_id 不同 (蛋白是 "1"，糖是 "11" 或 "7")
+
+    我们需要找出这些共价连接的配体，保留它们的原子和 entity 定义。
+    """
+    connected_auth_asym_ids: Set[str] = set()
+    connected_label_asym_ids: Set[str] = set()
+    connected_entity_ids: Set[str] = set()
+
+    try:
+        # 获取 label_asym_id 映射
+        label_asym_mapping = get_label_asym_id_mapping(block)
+
+        # 找出目标链对应的 label_asym_ids
+        target_label_asym_ids = set()
+        for label_asym, (auth_asym, entity_id) in label_asym_mapping.items():
+            if auth_asym in target_auth_chain_ids:
+                target_label_asym_ids.add(label_asym)
+
+        # 查找 _struct_conn 中的共价连接
+        struct_conn = block.find_mmcif_category("_struct_conn.")
+        if not struct_conn:
+            return connected_auth_asym_ids, connected_label_asym_ids, connected_entity_ids
+
+        # 获取列索引
+        try:
+            conn_type_col = struct_conn.find_column("conn_type_id")
+            ptnr1_label_asym_col = struct_conn.find_column("ptnr1_label_asym_id")
+            ptnr2_label_asym_col = struct_conn.find_column("ptnr2_label_asym_id")
+        except (ValueError, RuntimeError):
+            return connected_auth_asym_ids, connected_label_asym_ids, connected_entity_ids
+
+        # 遍历所有连接
+        for conn_type, ptnr1_asym, ptnr2_asym in zip(
+            conn_type_col, ptnr1_label_asym_col, ptnr2_label_asym_col
+        ):
+            conn_type = conn_type.strip()
+            ptnr1_asym = ptnr1_asym.strip()
+            ptnr2_asym = ptnr2_asym.strip()
+
+            # 只处理共价连接 (covale, covale_base, covale_phosph, covale_sugar)
+            if not conn_type.lower().startswith("covale"):
+                continue
+
+            # 如果一端是目标链，添加另一端
+            if ptnr1_asym in target_label_asym_ids and ptnr2_asym not in target_label_asym_ids:
+                connected_label_asym_ids.add(ptnr2_asym)
+                if ptnr2_asym in label_asym_mapping:
+                    auth_asym, entity_id = label_asym_mapping[ptnr2_asym]
+                    connected_auth_asym_ids.add(auth_asym)
+                    connected_entity_ids.add(entity_id)
+
+            if ptnr2_asym in target_label_asym_ids and ptnr1_asym not in target_label_asym_ids:
+                connected_label_asym_ids.add(ptnr1_asym)
+                if ptnr1_asym in label_asym_mapping:
+                    auth_asym, entity_id = label_asym_mapping[ptnr1_asym]
+                    connected_auth_asym_ids.add(auth_asym)
+                    connected_entity_ids.add(entity_id)
+
+    except (ValueError, RuntimeError):
+        pass
+
+    return connected_auth_asym_ids, connected_label_asym_ids, connected_entity_ids
+
+
 def get_entity_ids_for_chains(
     block: gemmi.cif.Block, chain_ids: Set[str]
 ) -> Set[str]:
-    """根据 auth_asym_id 找到对应的 entity_id 集合。"""
-    mapping = get_chain_entity_mapping(block)
-    return {mapping[c] for c in chain_ids if c in mapping}
+    """
+    根据 auth_asym_id 找到对应的所有 entity_id 集合。
+
+    注意: 一个 auth_asym_id 可能对应多个 entity_id，
+    例如蛋白链 A (entity=1) 和其附属的 NAG 配体 (entity=11) 都有 auth_asym_id=A。
+    """
+    entity_ids = set()
+    try:
+        atom_site = block.find_mmcif_category("_atom_site.")
+        if not atom_site:
+            return entity_ids
+
+        chain_col = atom_site.find_column("auth_asym_id")
+        entity_col = atom_site.find_column("label_entity_id")
+
+        for chain_id, entity_id in zip(chain_col, entity_col):
+            chain_id = chain_id.strip()
+            entity_id = entity_id.strip()
+            if chain_id in chain_ids and entity_id:
+                entity_ids.add(entity_id)
+    except (ValueError, RuntimeError):
+        pass
+
+    return entity_ids
 
 
 def get_category_from_tag(tag: str) -> str:
@@ -239,6 +374,7 @@ def create_filtered_block(
     source_block: gemmi.cif.Block,
     target_chain_ids: Set[str],
     target_entity_ids: Set[str],
+    target_label_asym_ids: Set[str],
     new_entry_name: str,
 ) -> gemmi.cif.Block:
     """
@@ -246,8 +382,9 @@ def create_filtered_block(
 
     Args:
         source_block: 源 CIF block
-        target_chain_ids: 要保留的链 ID 集合
+        target_chain_ids: 要保留的链 ID 集合 (auth_asym_id)
         target_entity_ids: 要保留的 entity ID 集合
+        target_label_asym_ids: 要保留的 label_asym_id 集合 (内部链 ID)
         new_entry_name: 新 block 的名称
     """
     # 创建新的 Document 和 Block
@@ -287,6 +424,18 @@ def create_filtered_block(
                 filter_col = ENTITY_FILTER_CATEGORIES[category]
                 tags, rows = filter_loop_rows(
                     loop, filter_col, target_entity_ids
+                )
+
+                if rows:
+                    new_loop = new_block.init_loop("", tags)
+                    for row in rows:
+                        new_loop.add_row(row)
+
+            elif category in LABEL_ASYM_FILTER_CATEGORIES:
+                # 使用 label_asym_id 过滤 (如 _struct_asym)
+                filter_col = LABEL_ASYM_FILTER_CATEGORIES[category]
+                tags, rows = filter_loop_rows(
+                    loop, filter_col, target_label_asym_ids
                 )
 
                 if rows:
@@ -369,15 +518,47 @@ def process_entry(row: pd.Series, input_aligned_dir: Path, output_base_dir: Path
         ab_entity_ids = get_entity_ids_for_chains(block, ab_chains)
         ag_entity_ids = get_entity_ids_for_chains(block, ag_chains)
 
-        # 5. Create filtered blocks
-        ab_block = create_filtered_block(
-            block, ab_chains, ab_entity_ids, f"{epitope_id}_antibody"
+        # 5. Get label_asym_ids and find connected ligands
+        label_asym_mapping = get_label_asym_id_mapping(block)
+
+        # 5a. 找出 ab_chains 对应的 label_asym_ids
+        ab_label_asym_ids = set()
+        for label_asym, (auth_asym, entity_id) in label_asym_mapping.items():
+            if auth_asym in ab_chains:
+                ab_label_asym_ids.add(label_asym)
+
+        # 5b. 找出 ag_chains 对应的 label_asym_ids
+        ag_label_asym_ids = set()
+        for label_asym, (auth_asym, entity_id) in label_asym_mapping.items():
+            if auth_asym in ag_chains:
+                ag_label_asym_ids.add(label_asym)
+
+        # 5c. 找出共价连接的配体，扩展 chain_ids, entity_ids 和 label_asym_ids
+        ab_conn_auth, ab_conn_label, ab_conn_entity = get_connected_ligand_info(
+            block, ab_chains
         )
-        ag_block = create_filtered_block(
-            block, ag_chains, ag_entity_ids, f"{epitope_id}_antigen"
+        ag_conn_auth, ag_conn_label, ag_conn_entity = get_connected_ligand_info(
+            block, ag_chains
         )
 
-        # 6. Save
+        # 扩展 auth_asym_ids (用于 _atom_site 等按 auth_asym_id 过滤的 category)
+        ab_chains = ab_chains | ab_conn_auth
+        ag_chains = ag_chains | ag_conn_auth
+
+        ab_entity_ids = ab_entity_ids | ab_conn_entity
+        ag_entity_ids = ag_entity_ids | ag_conn_entity
+        ab_label_asym_ids = ab_label_asym_ids | ab_conn_label
+        ag_label_asym_ids = ag_label_asym_ids | ag_conn_label
+
+        # 6. Create filtered blocks
+        ab_block = create_filtered_block(
+            block, ab_chains, ab_entity_ids, ab_label_asym_ids, f"{epitope_id}_antibody"
+        )
+        ag_block = create_filtered_block(
+            block, ag_chains, ag_entity_ids, ag_label_asym_ids, f"{epitope_id}_antigen"
+        )
+
+        # 7. Save
         output_dir = output_base_dir / str(cluster_id) / epitope_id
         output_dir.mkdir(parents=True, exist_ok=True)
 
