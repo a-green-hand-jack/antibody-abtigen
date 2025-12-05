@@ -271,9 +271,12 @@ def main():
                 ab_structure_groups.append({"group": {"id": c_id_label, "visibility": 2}})
 
         if ab_include:
+            # Calculate relative path from output_yaml_dir to pdb_path
+            rel_path = os.path.relpath(str(pdb_path), str(output_yaml_dir))
+
             ab_entity = {
                 "file": {
-                    "path": str(pdb_path.resolve()),  # Absolute path to PDB file
+                    "path": rel_path,  # Relative path from YAML to PDB file
                     "include": ab_include,
                     "structure_groups": ab_structure_groups
                 }
@@ -306,9 +309,10 @@ def main():
                     if range_str:
                         ag_binding.append({"chain": {"id": ag_mapping.get(ag_chain, ag_chain), "binding": range_str}})
 
+                # Use same relative path as antibody
                 ag_entity = {
                     "file": {
-                        "path": str(pdb_path.resolve()),  # Same PDB file
+                        "path": rel_path,  # Same PDB file, same relative path
                         "include": ag_include,
                         "structure_groups": ag_groups,
                     }
