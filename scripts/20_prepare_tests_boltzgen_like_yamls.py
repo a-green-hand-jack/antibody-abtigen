@@ -68,38 +68,51 @@ def get_auth_to_label_mapping(pdb_path: Path) -> Dict[str, str]:
     return mapping
 
 
-def get_epitope_residues(antibody_path: Path, antigen_path: Path, ab_chain: str, ag_chain: str, dist_threshold: float = 4.5) -> List[int]:
+def get_epitope_residues(pdb_path: Path, ab_chains: List[str], ag_chain: str, dist_threshold: float = 4.5) -> List[int]:
     """
-    Identifies antigen residues within distance threshold of antibody.
+    Identifies antigen residues within distance threshold of antibody chains.
     Returns: [list of 1-based POSITIONAL indices]
     """
-    ab_struc = load_structure(antibody_path)
-    ag_struc = load_structure(antigen_path)
+    structure = load_structure(pdb_path)
 
-    if not ab_struc or not ag_struc:
+    if not structure:
         return []
 
-    # Build neighbor search for Antibody
-    ns = gemmi.NeighborSearch(ab_struc[0], ab_struc.cell, dist_threshold + 2).populate()
+    model = structure[0]
+
+    # Collect all antibody atoms
+    ab_atoms = []
+    for chain in model:
+        if chain.name in ab_chains:
+            for res in chain:
+                for atom in res:
+                    ab_atoms.append(atom)
+
+    if not ab_atoms:
+        return []
 
     residues_in_contact = set()
 
-    # Iterate over Antigen atoms
-    for model in ag_struc:
-        for chain in model:
-            if chain.name != ag_chain:
-                continue
+    # Check each antigen residue against antibody atoms
+    for chain in model:
+        if chain.name != ag_chain:
+            continue
 
-            for i, res in enumerate(chain):
-                is_contact = False
-                for atom in res:
-                    close_atoms = ns.find_neighbors(atom, dist_threshold)
-                    if close_atoms:
+        for i, res in enumerate(chain):
+            is_contact = False
+            for ag_atom in res:
+                ag_pos = ag_atom.pos
+                for ab_atom in ab_atoms:
+                    ab_pos = ab_atom.pos
+                    dist = ag_pos.dist(ab_pos)
+                    if dist < dist_threshold:
                         is_contact = True
                         break
-
                 if is_contact:
-                    residues_in_contact.add(i + 1)
+                    break
+
+            if is_contact:
+                residues_in_contact.add(i + 1)
 
     return sorted(list(residues_in_contact))
 
@@ -293,12 +306,15 @@ def main():
             yaml_entities.append(ab_entity)
 
         # --- Process Antigen(s) ---
+        # Collect antibody chain IDs for epitope detection
+        ab_chain_ids = [c_id for _, c_id, _, _ in chains_to_process if c_id]
+
         if antigen_chains:
             for ag_chain in antigen_chains:
                 ag_mapping = mapping
 
-                # Compute epitopes
-                epitopes = get_epitope_residues(pdb_path, pdb_path, h_chain or 'H', ag_chain)
+                # Compute epitopes using antibody chains
+                epitopes = get_epitope_residues(pdb_path, ab_chain_ids, ag_chain)
 
                 ag_include = [{"chain": {"id": ag_mapping.get(ag_chain, ag_chain)}}]
                 ag_groups = [{"group": {"id": ag_mapping.get(ag_chain, ag_chain), "visibility": 2}}]
